@@ -1,0 +1,16 @@
+13/05
+- Set up Git + GitHub for the ArmPi Ultra project: initialized a local repo, created a remote on GitHub, and pushed the first commit, following the roadmap’s “Git from day one” practice.
+- Completed the Phase 0 Python prerequisite on my laptop: created a armpi virtual environment, installed numpy and opencv-python, and wrote a script that loads a JPEG, converts it to grayscale, and saves the result, matching the roadmap’s concrete Python test.
+- Configured VS Code as my main dev environment: opened the project folder, wired VS Code to use the armpi venv, and verified I can run Python scripts from the integrated terminal/editor. 
+- Clarified and decided on network strategy for the ArmPi Ultra: chose to use AP mode (robot’s HW_… hotspot with password hiwonder) instead of joining the campus Wi‑Fi with a captive portal, in line with the Hiwonder user manual’s initial setup workflow.
+
+tomorows work:
+- SSH into the Pi, make a few test scripts
+- Run and learn Robot Operating System (ROS)
+# Test commands you should be able to run and understand after the tutorials:
+ros2 node list
+ros2 topic list
+ros2 topic echo /some_topic
+ros2 topic hz /some_topic
+ros2 service list
+ros2 launch <package> <launch_file.py>
