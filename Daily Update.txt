@@ -14,3 +14,9 @@ ros2 topic echo /some_topic
 ros2 topic hz /some_topic
 ros2 service list
 ros2 launch <package> <launch_file.py>
+
+14/05
+- Spend the whole day trying to push something to raspy but seems like AP connection is laggy/CPU overload one or two 
+- Can't even connect, even if i try to the app crashes and froze 
+- Tried to do mobile hotspot to do LAN connection but didnt work either
+- Saw a LAN port on the rasp pi, i'll bring my cable and test tomorow too see if connection improves, literally can't do anything if it continues like this
