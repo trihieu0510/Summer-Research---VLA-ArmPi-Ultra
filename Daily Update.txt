@@ -28,4 +28,5 @@ ros2 launch <package> <launch_file.py>
 - Fixed a zsh corrupt history error.
 - Confirmed SSH is the main way I’ll control the Pi for this project.
 - Decided to stop wasting time on Ethernet and just use AP mode for now.
-- Next step: finish Phase 0 in AP mode by proving SSH, Python venv, and ROS 2 basics work.
+- Created virtual environment in python, did some ROS basics
+- Next step: finish Phase 0 in AP mode by proving SSH, also try to make this fuckass network better through either LAN or just figure something out cause this poor network is literally unusable 
