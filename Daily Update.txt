@@ -20,3 +20,12 @@ ros2 launch <package> <launch_file.py>
 - Can't even connect, even if i try to the app crashes and froze 
 - Tried to do mobile hotspot to do LAN connection but didnt work either
 - Saw a LAN port on the rasp pi, i'll bring my cable and test tomorow too see if connection improves, literally can't do anything if it continues like this
+
+18/05
+- Tried setting up direct Ethernet SSH for the ArmPi Ultra, but eth0 never got an IPv4 address.
+- Edited /etc/dhcpcd.conf in nano and learned how to save/exit properly.
+- Ran ip a and apt update; networking/DNS over Ethernet did not work.
+- Fixed a zsh corrupt history error.
+- Confirmed SSH is the main way I’ll control the Pi for this project.
+- Decided to stop wasting time on Ethernet and just use AP mode for now.
+- Next step: finish Phase 0 in AP mode by proving SSH, Python venv, and ROS 2 basics work.
