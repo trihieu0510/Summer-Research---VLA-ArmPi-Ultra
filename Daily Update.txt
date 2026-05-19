@@ -30,3 +30,8 @@ ros2 launch <package> <launch_file.py>
 - Decided to stop wasting time on Ethernet and just use AP mode for now.
 - Created virtual environment in python, did some ROS basics
 - Next step: finish Phase 0 in AP mode by proving SSH, also try to make this fuckass network better through either LAN or just figure something out cause this poor network is literally unusable 
+
+19/05 
+- Learned Python, familiarize myself with the syntax
+- Need to learn more about libraries, especially the relevant ones like openCV, scikitlearn,.... for further application into the project
+- Goal: learn libraries, also lrean about code in the Robot Operating System also
