@@ -35,3 +35,11 @@ ros2 launch <package> <launch_file.py>
 - Learned Python, familiarize myself with the syntax
 - Need to learn more about libraries, especially the relevant ones like openCV, scikitlearn,.... for further application into the project
 - Goal: learn libraries, also lrean about code in the Robot Operating System also
+- Drop early today, gotta go back n submit papers for china visa lol
+
+09/06
+- Came back from a 2 weeks break going back to vn, came back n ready to do more shit
+- CONNECTED TO INTERNET & A STABLE CONNECTION!
+- turns out the manual is total shit, only providing 2 ways of connecting
+- instead of searching for ways to connect to the specific device, can just search for rasp pi since its the "brain" of the robot, which gives more alternatives
+- turn on "let other device to connect through wifi", then connect the lan cable from the robot to the laptop, while also connecting to wifi
