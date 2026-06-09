@@ -43,3 +43,20 @@ ros2 launch <package> <launch_file.py>
 - turns out the manual is total shit, only providing 2 ways of connecting
 - instead of searching for ways to connect to the specific device, can just search for rasp pi since its the "brain" of the robot, which gives more alternatives
 - turn on "let other device to connect through wifi", then connect the lan cable from the robot to the laptop, while also connecting to wifi
+- trying to connect the ros file from the pi into a vscode for syncronization so that i dont have to push every time i try something
+- turns out the whole thing is in a docker container
+
+First Launch Attempt
+
+Ran ros2 node list → empty (no competing nodes, autostart not active)
+Located and ran ~/.stop_ros.sh (no output, ran cleanly)
+Attempted: ros2 launch large_models llm_control_servo.launch.py
+Result: [ERROR]: Caught exception in launch: 'need_compile'
+
+Diagnosis: need_compile is a Hiwonder-specific environment variable the launch files require (controls whether install or source paths are used). It is not set in the default shell, hence the KeyError.
+Blockers / Next Session
+
+Run export need_compile=True and retry the launch
+Check ~/ros2_ws/src + ~/.bashrc to find the full Hiwonder environment block, then add ROS2 sourcing + need_compile (and any other missing vars) to ~/.bashrc permanently
+Confirm API keys are set in ~/ros2_ws/src/large_models/large_models/config.py
+Achieve first successful voice command: "Hello Hiwonder" → "Servo 1 move to 90 degrees"
