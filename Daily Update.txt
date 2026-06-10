@@ -60,3 +60,11 @@ Run export need_compile=True and retry the launch
 Check ~/ros2_ws/src + ~/.bashrc to find the full Hiwonder environment block, then add ROS2 sourcing + need_compile (and any other missing vars) to ~/.bashrc permanently
 Confirm API keys are set in ~/ros2_ws/src/large_models/large_models/config.py
 Achieve first successful voice command: "Hello Hiwonder" → "Servo 1 move to 90 degrees"
+
+10/06:
+- THE THING MOVED!
+- Fixed networking: LAN cable + Windows ICS, Pi gets 192.168.137.x, keeps laptop WiFi for internet.
+- Fixed ROS2 environment permanently in ~/.bashrc: sourced Humble, set all Hiwonder variables (need_compile=False was the key fix — True causes a launch crash).
+- Always run ~/.stop_ros.sh before any launch to free the STM32 serial port from the autostart.
+- Confirmed arm hardware works without API keys via ros2 launch sdk armpi_ultra.launch.py + direct servo topic publish — arm moved.
+- Blocker: need OpenAI + OpenRouter API keys (with credit) to unlock the voice pipeline.
