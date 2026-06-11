@@ -68,3 +68,9 @@ Achieve first successful voice command: "Hello Hiwonder" → "Servo 1 move to 90
 - Always run ~/.stop_ros.sh before any launch to free the STM32 serial port from the autostart.
 - Confirmed arm hardware works without API keys via ros2 launch sdk armpi_ultra.launch.py + direct servo topic publish — arm moved.
 - Blocker: need OpenAI + OpenRouter API keys (with credit) to unlock the voice pipeline.
+
+11/06:
+- Had a pretty interesting watch about robotics machine learning and why it's harder than the usual logic sense
+- Planning to buy api tockens to do a NLP pipeline where its Automatic Speech Recognintion -> LMM Model -> Text to Speech pipeline
+- connected the pi to wifi, planning to try forwarding port so that remote work is another option
+- tomorow will do both of these things
