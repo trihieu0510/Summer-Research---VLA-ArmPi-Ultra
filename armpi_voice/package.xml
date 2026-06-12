@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>armpi_voice</name>
+  <version>0.1.0</version>
+  <description>Voice-commanded control for the Hiwonder ArmPi Ultra: speech transcript -> LLM intent -> servo motion.</description>
+  <maintainer email="leannewong11@gmail.com">Tri Hieu</maintainer>
+  <license>MIT</license>
+
+  <!-- Runtime ROS dependencies (the node imports these) -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>ros_robot_controller_msgs</exec_depend>
+  <!-- NOTE: the `openai` Python package is a pip dependency, not a ROS one.
+       Install it inside the container: pip install openai -->
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
