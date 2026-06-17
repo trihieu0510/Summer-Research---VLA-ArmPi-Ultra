@@ -74,3 +74,14 @@ Achieve first successful voice command: "Hello Hiwonder" → "Servo 1 move to 90
 - Planning to buy api tockens to do a NLP pipeline where its Automatic Speech Recognintion -> LMM Model -> Text to Speech pipeline
 - connected the pi to wifi, planning to try forwarding port so that remote work is another option
 - tomorow will do both of these things
+
+12/06
+- Created the voice pipeline for the Robot, successfully finished the voice arm control python file
+- Deciding whether I should use outer api or download a model inside my computer
+
+15+16+17/06
+- Fixed colcon (the robot image had its source files stripped out) by reinstalling into ~/.local, then built and ran the armpi_voice package.
+- Got the full loop working — typed command → LLM → arm moves — and learned the ROS2 multi-terminal workflow.
+- Switched the LLM to local Ollama (qwen3) to get around the Hong Kong geo-block; confirmed Gemini's API is blocked here too.
+- Cut the ~30s delay by moving to qwen3:1.7b (qwen3 "thinks" before answering, which was the slowdown).
+- Built a one-command launch file and an interactive console to replace ros2 topic pub — text working, voice next.

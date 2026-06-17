@@ -2,26 +2,58 @@
 
 Voice-commanded control for the **Hiwonder ArmPi Ultra**.
 
-Pipeline: `/voice_words` (speech-to-text transcript) → **DeepSeek LLM** (intent → JSON) → servo motion
+Pipeline: `/voice_words` (speech-to-text transcript) → **LLM** (intent → JSON) → servo motion
 on `/ros_robot_controller/bus_servo/set_position`.
 
-Runs **on the Pi**, inside the Hiwonder ROS 2 Humble Docker container.
+Runs **on the Pi**, inside the Hiwonder ROS 2 Humble Docker container. The LLM can run
+**off-board on a dev laptop** (recommended during development) or **on the Pi** itself.
 
 ## Supported actions
 `home`, `left`, `right`, `open`, `close`, `nod` (anything else → `unknown`, ignored).
 Edit the `ACTIONS` table at the top of `armpi_voice/voice_arm_control.py` to add or tune gestures.
 
-## One-time setup (in the container)
+## LLM backend (local by default — no API key, no cost)
+
+The node talks to any OpenAI-compatible endpoint. Default is a local **Ollama** server.
+Use a **3B-class or larger** model for reliable JSON — `qwen:0.5b` is too weak.
+
+### Recommended: model on the dev laptop, Pi calls it over the LAN
+The Pi is CPU-only (no GPU); offloading the LLM to the laptop is faster and keeps the
+Pi's cores free. The two are already wired together via LAN cable + Windows ICS
+(laptop = `192.168.137.1`, Pi = `192.168.137.x`).
+
+On the **laptop** (Windows), one time:
+```powershell
+# Make Ollama listen on the LAN, not just localhost, then RESTART the Ollama app:
+setx OLLAMA_HOST "0.0.0.0:11434"
+ollama pull qwen3:8b
+# Open the firewall port (admin PowerShell):
+New-NetFirewallRule -DisplayName "Ollama LAN" -Direction Inbound -LocalPort 11434 -Protocol TCP -Action Allow
+```
+> ⚠️ If a **VPN** is active, enable "allow local/LAN access" or disconnect it — VPNs
+> commonly block the `192.168.137.x` subnet, which stops the Pi from reaching the laptop.
+
+Verify the Pi can reach it (from an SSH session on the Pi):
 ```bash
-pip install openai                                   # DeepSeek uses the OpenAI client
-cp -r <your-repo>/armpi_voice ~/ros2_ws/src/         # put the package in the workspace
-cd ~/ros2_ws
-colcon build --packages-select armpi_voice --symlink-install
+curl http://192.168.137.1:11434/v1/models      # should list qwen3:8b
 ```
 
-Set your DeepSeek key (add to `~/.bashrc` to persist):
+### Alternative: model on the Pi (standalone/offline, slower)
+`ollama pull qwen2.5:3b` on the Pi and leave `base_url` at its `localhost` default.
+
+### Alternative: cloud (best reasoning, costs money, needs network)
 ```bash
-export DEEPSEEK_API_KEY="sk-..."
+export LLM_API_KEY="sk-..."     # never hardcode — this repo is pushed to GitHub
+# then launch with -p base_url:=https://api.deepseek.com -p model:=deepseek-chat
+```
+
+## Deploy & build (in the container, on the Pi)
+```bash
+pip install openai                                   # OpenAI-compatible client
+# copy the package into the workspace (scp from the laptop, or git pull), then:
+cd ~/ros2_ws
+colcon build --packages-select armpi_voice --symlink-install
+source install/setup.bash
 ```
 
 ## Run
@@ -30,9 +62,10 @@ export DEEPSEEK_API_KEY="sk-..."
 ~/.stop_ros.sh
 ros2 launch sdk armpi_ultra.launch.py
 
-# Terminal 2
+# Terminal 2 — the voice node, pointed at the laptop's Ollama
 cd ~/ros2_ws && source install/setup.bash
-ros2 run armpi_voice voice_arm_control
+ros2 run armpi_voice voice_arm_control --ros-args \
+  -p base_url:=http://192.168.137.1:11434/v1 -p model:=qwen3:8b
 ```
 
 ## Test without a microphone
@@ -47,16 +80,11 @@ Override at launch with `--ros-args -p <name>:=<value>`:
 
 | Parameter | Default | Purpose |
 |---|---|---|
-| `model` | `deepseek-chat` | LLM model name |
-| `base_url` | `https://api.deepseek.com` | LLM API endpoint (OpenAI-compatible) |
+| `model` | `qwen2.5:3b` | LLM model name (use `qwen3:8b` when pointing at the laptop) |
+| `base_url` | `http://localhost:11434/v1` | LLM endpoint; set to `http://192.168.137.1:11434/v1` for the laptop |
 | `voice_topic` | `/voice_words` | input transcript topic |
 | `servo_topic` | `/ros_robot_controller/bus_servo/set_position` | output servo topic |
-| `request_timeout` | `15.0` | LLM request timeout (seconds) |
-
-Example:
-```bash
-ros2 run armpi_voice voice_arm_control --ros-args -p request_timeout:=20.0
-```
+| `request_timeout` | `30.0` | LLM request timeout (seconds) |
 
 ## ⚠️ Verify on the hardware before trusting the motions
 These were carried over from the original prototype and are **not yet confirmed**:

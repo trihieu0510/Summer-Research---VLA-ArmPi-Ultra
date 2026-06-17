@@ -6,13 +6,28 @@ Voice-commanded control node for the Hiwonder ArmPi Ultra (6-DOF arm).
 
 Data flow:
     /voice_words (std_msgs/String)        speech-to-text transcript (WonderEcho)
-        -> DeepSeek LLM                   natural language -> structured JSON intent
+        -> local LLM via Ollama           natural language -> structured JSON intent
         -> /ros_robot_controller/bus_servo/set_position (ServosPosition)
 
 Runs ON THE PI, inside the Hiwonder ROS 2 Humble Docker container.
 
-Setup:
-    export DEEPSEEK_API_KEY="sk-..."      # required; never hardcode (repo is pushed to GitHub)
+LLM backend:
+    Talks to any OpenAI-compatible endpoint. Default is a LOCAL model served by
+    Ollama -- no API key, no per-call cost. Pick a 3B-class model for reliable
+    JSON (qwen:0.5b is too weak).
+
+    Model on this dev LAPTOP (recommended during development), Pi calls it over
+    the LAN -- override base_url with the laptop's ICS IP:
+        ros2 run armpi_voice voice_arm_control --ros-args \
+            -p base_url:=http://192.168.137.1:11434/v1 -p model:=qwen2.5:3b
+
+    Model on the PI itself (standalone/offline, slower on the 4-core CPU):
+        leave base_url at the http://localhost:11434/v1 default.
+
+    Cloud model instead (set a key; never hardcode -- repo is pushed to GitHub):
+        export LLM_API_KEY="sk-..."
+        ros2 run armpi_voice voice_arm_control --ros-args \
+            -p base_url:=https://api.deepseek.com -p model:=deepseek-chat
 
 Design notes:
     * The blocking LLM network call runs in a dedicated worker thread so it never stalls
@@ -24,6 +39,7 @@ Design notes:
 import json
 import os
 import queue
+import re
 import threading
 import time
 
@@ -69,11 +85,13 @@ class VoiceArmController(Node):
         super().__init__('voice_arm_controller')
 
         # --- Parameters (override at launch without editing code) ---
-        self.declare_parameter('model', 'deepseek-chat')
-        self.declare_parameter('base_url', 'https://api.deepseek.com')
+        # Defaults target a LOCAL Ollama model. For a model on the dev laptop,
+        # override base_url with the laptop's LAN IP (e.g. http://192.168.137.1:11434/v1).
+        self.declare_parameter('model', 'qwen2.5:3b')
+        self.declare_parameter('base_url', 'http://localhost:11434/v1')
         self.declare_parameter('voice_topic', '/voice_words')
         self.declare_parameter('servo_topic', '/ros_robot_controller/bus_servo/set_position')
-        self.declare_parameter('request_timeout', 15.0)
+        self.declare_parameter('request_timeout', 30.0)
 
         self.model_name = self.get_parameter('model').value
         base_url = self.get_parameter('base_url').value
@@ -81,13 +99,15 @@ class VoiceArmController(Node):
         servo_topic = self.get_parameter('servo_topic').value
         self.request_timeout = float(self.get_parameter('request_timeout').value)
 
-        # --- LLM client (DeepSeek is OpenAI-API compatible) ---
-        api_key = os.environ.get('DEEPSEEK_API_KEY')
-        if not api_key:
-            raise RuntimeError(
-                "DEEPSEEK_API_KEY environment variable is not set. "
-                'Run: export DEEPSEEK_API_KEY="sk-..." (add it to ~/.bashrc to persist).'
-            )
+        # --- LLM client (any OpenAI-compatible endpoint: Ollama, DeepSeek, OpenAI) ---
+        # Local Ollama needs no key; the OpenAI client just needs a non-empty string.
+        # For a cloud endpoint, set LLM_API_KEY (falls back to DEEPSEEK_API_KEY/OPENAI_API_KEY).
+        api_key = (
+            os.environ.get('LLM_API_KEY')
+            or os.environ.get('DEEPSEEK_API_KEY')
+            or os.environ.get('OPENAI_API_KEY')
+            or 'ollama'  # dummy placeholder for keyless local servers
+        )
         self.llm_client = OpenAI(
             base_url=base_url,
             api_key=api_key,
@@ -178,14 +198,19 @@ class VoiceArmController(Node):
 
     @staticmethod
     def _parse_action(content: str) -> str:
-        """Extract the action name from the LLM reply, tolerating stray markdown fences."""
-        if content.startswith("```"):
-            content = content.strip("`")
-            if content.startswith("json"):
-                content = content[4:]
-            content = content.strip()
+        """Extract the action name from the LLM reply.
+
+        Tolerant of: markdown ```json fences, leading prose, and reasoning models
+        (e.g. qwen3) that emit a <think>...</think> block before the JSON.
+        """
+        # Drop any chain-of-thought a reasoning model prepends to the answer.
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+        # Grab the first {...} object, ignoring fences / stray text around it.
+        match = re.search(r"\{.*\}", content, flags=re.DOTALL)
+        if not match:
+            return "unknown"
         try:
-            intent = json.loads(content)
+            intent = json.loads(match.group(0))
         except json.JSONDecodeError:
             return "unknown"
         action = intent.get("action", "unknown")
