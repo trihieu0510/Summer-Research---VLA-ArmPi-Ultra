@@ -85,3 +85,18 @@ Achieve first successful voice command: "Hello Hiwonder" → "Servo 1 move to 90
 - Switched the LLM to local Ollama (qwen3) to get around the Hong Kong geo-block; confirmed Gemini's API is blocked here too.
 - Cut the ~30s delay by moving to qwen3:1.7b (qwen3 "thinks" before answering, which was the slowdown).
 - Built a one-command launch file and an interactive console to replace ros2 topic pub — text working, voice next.
+
+18/19/20/21 lab closed lmao
+
+21/06 and 22/06
+Repointed LLM from local Ollama → DeepSeek cloud API (deepseek-chat).
+Set up ICS on new PC so Pi has internet.
+Brought up depth camera; confirmed RGB / depth / IR / pointcloud topics at ~10 Hz.
+Wrote grab_frame.py for headless image inspection via VS Code.
+Traced launch files to find the real pick-and-place demo (app.object_sorting, not color_space).
+Ran the color_sorting demo end-to-end. Detection, depth→3D, IK, full grasp trajectory — all working.
+Hit calibration drift — gripper lands 1–7 cm off the block. Tried 6 YAML offset iterations; didn't converge.
+Concluded: need the proper hand-eye calibration tool, not YAML tuning.
+
+Next session:Run ~/software/calibration/tool.sh (GUI — needs VNC) to fix the hand-eye transform. Then re-test color pick.
+Status: Full manipulation chain validated. Calibration tooling is the only thing between current state and reliable pick-and-place.
