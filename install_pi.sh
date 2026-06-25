@@ -15,10 +15,12 @@ BASE=https://raw.githubusercontent.com/trihieu0510/Summer-Research---VLA-ArmPi-U
 PKG="$HOME/ros2_ws/src/armpi_voice"
 
 echo "Downloading armpi_voice files from GitHub..."
-curl -fsSL "$BASE/armpi_voice/setup.py"                  -o "$PKG/setup.py"
-curl -fsSL "$BASE/armpi_voice/chat.sh"                   -o "$PKG/chat.sh"
-curl -fsSL "$BASE/armpi_voice/armpi_voice/arm_console.py" -o "$PKG/armpi_voice/arm_console.py"
-curl -fsSL "$BASE/armpi_voice/armpi_voice/arm_agent.py"   -o "$PKG/armpi_voice/arm_agent.py"
+# Cache-bust the raw.githubusercontent CDN (it caches files for a few minutes).
+V="?v=$(date +%s)"
+curl -fsSL "$BASE/armpi_voice/setup.py$V"                  -o "$PKG/setup.py"
+curl -fsSL "$BASE/armpi_voice/chat.sh$V"                   -o "$PKG/chat.sh"
+curl -fsSL "$BASE/armpi_voice/armpi_voice/arm_console.py$V" -o "$PKG/armpi_voice/arm_console.py"
+curl -fsSL "$BASE/armpi_voice/armpi_voice/arm_agent.py$V"   -o "$PKG/armpi_voice/arm_agent.py"
 
 echo "Building armpi_voice..."
 cd "$HOME/ros2_ws"

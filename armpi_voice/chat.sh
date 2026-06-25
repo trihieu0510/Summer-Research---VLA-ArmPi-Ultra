@@ -41,11 +41,12 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "Freeing the STM32 serial port (stopping the autostart)..."
-# NOTE: ~/.stop_ros.sh does `ps aux | grep ros | ... kill -9`, which kills EVERY
-# process whose command line contains "ros" — including THIS script, because its
-# path contains "ros2_ws" (that's the mysterious "Killed"). So we replicate the
-# intent but skip our own PID and parent.
-for pid in $(ps -eo pid=,args= | grep -i '[r]os' | awk '{print $1}'); do
+# ~/.stop_ros.sh does `ps aux | grep ros | ... kill -9` — it nukes EVERY process
+# whose command line contains "ros", which (a) kills THIS script, since its path
+# contains "ros2_ws", and (b) kills the camera driver + camera_stream too. So we
+# do a SURGICAL version: kill the ROS autostart but SPARE the camera and ourselves.
+CAMERA_KEEP='ascamera|deptrum|aurora|depth_camera|camera_stream'
+for pid in $(ps -eo pid=,args= | grep -i '[r]os' | grep -viE "$CAMERA_KEEP" | awk '{print $1}'); do
     [ "$pid" = "$$" ] && continue
     [ "$pid" = "$PPID" ] && continue
     kill -9 "$pid" 2>/dev/null
