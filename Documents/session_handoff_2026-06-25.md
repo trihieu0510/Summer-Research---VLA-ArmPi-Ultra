@@ -1,92 +1,129 @@
-# Session Handoff — June 25, 2026
+# Session Handoff — June 25, 2026 (end of day)
 
-## Context for next session
+> Read this first next session. It's the full picture: what the project is, how the
+> machines connect, what's built, what works, and what's next. Operational commands
+> live in `Documents/COMMANDS.md`; the running journal is `Daily Update.txt`.
 
-This was the first **fully remote** session: no physical access to the robot. The
-working chain is **you → remote desktop → a PC → LAN cable → Pi (ROS 2 container)**.
-SSH + VS Code Remote into the Pi, attach to the `ArmPiUltra` container. Internet
-reaches the Pi via **ICS on the PC** — that broke this session (DNS not forwarding)
-and had to be re-armed; expect to re-check it whenever the PC or its network changes.
+---
 
-## What got done
+## 1. The project in one paragraph
 
-1. **Remote live camera feed** — new `camera_stream.py` (repo root, and copied to the
-   Pi at `~/ros2_ws/camera_stream.py`). MJPEG-over-HTTP server: subscribes to a camera
-   topic, serves frames to a browser. View at `http://192.168.137.<pi>:8080` from the
-   PC (same LAN — no SSH tunnel needed). Stdlib + `rclpy`/`cv_bridge`/`cv2` only.
-2. **Color-pick calibration, partially tuned remotely** — see below. Parked on physical
-   access.
-3. **Wk 3 conversational agent** — new `armpi_voice/arm_agent.py`. Supersedes the
-   classifier `voice_arm_control.py` (kept as fallback). Working end-to-end on DeepSeek.
+Voice-controlled robotic manipulation on a **Hiwonder ArmPi Ultra** (6-DOF arm,
+**Raspberry Pi 5 / 16 GB, no GPU**, STM32 servo controller, Aurora RGB-D camera,
+WonderEcho USB mic, USB speaker). Goal: **speak/type a command → the robot perceives,
+reasons, acts, and talks back.** Architecture is a **modular pipeline** (not end-to-end):
+`speech/text → LLM reasoning → (vision + depth + calibration) → IK → servos → voice`.
+The LLM is **DeepSeek cloud** (`deepseek-chat`). 7-week plan runs to mid-August.
 
-## Immediate next tasks
+## 2. How the machines connect (critical)
 
-- **In the lab (needs hands on the robot):** run the hand-eye calibration tool
-  `~/software/calibration/tool.sh` (GUI → needs VNC) to fix the drift properly, then
-  re-test the color pick. The remote offset-tuning got close but can't finish the job.
-- **Remotely (Wk 4):** add a TTS node that subscribes to `/robot_speech` (String) and
-  speaks the agent's replies — the seam is already in place.
-- **Remotely (Wk 2):** refactor `app/object_sorting.py`'s grasp logic into a callable
-  `pick(color)` skill so the agent can eventually trigger manipulation, not just gestures.
+You work **fully remotely** right now:
+**you → remote desktop → a PC → LAN cable → Raspberry Pi 5**.
+- The Pi runs **ROS 2 Humble inside a Docker container** (Hiwonder's image). The host Pi
+  OS has **no ros2** — every `ros2` command runs in the container.
+- Internet reaches the Pi via **Windows ICS on the PC** (Pi gets `192.168.137.x`). ICS
+  drops easily when the PC/network changes — symptom is API calls timing out at DNS.
+- You edit on the Pi via **VS Code Remote-SSH** (workspace opened at `~/ros2_ws`).
 
-## arm_agent.py — how it works
+### The remote-work gotcha that ate half the day
+The **remote-desktop clipboard mangles pasted code** — it adds leading indentation
+(breaks Python) and truncates long lines. **Do not paste code or long commands.**
+Instead, edits are pushed to GitHub from the laptop and **pulled onto the Pi via
+`curl`** (the repo is public). `install_pi.sh` does this in one short command. See COMMANDS.md.
 
-- Subscribes `/voice_words` (String) → DeepSeek (`https://api.deepseek.com`,
-  `deepseek-chat`) → returns `{"action": <gesture|none>, "say": <reply>}`.
-- Executes the gesture (if any) on `/ros_robot_controller/bus_servo/set_position`, and
-  **always** publishes the spoken reply on `/robot_speech`.
-- Rolling conversation memory (`history_turns` param, default 4 exchanges).
-- Run it:
-  ```bash
-  export LLM_API_KEY="<deepseek-key>"
-  ros2 run armpi_voice arm_agent --ros-args \
-    -p base_url:=https://api.deepseek.com -p model:=deepseek-chat
-  ```
-- Needs the SDK up for motion: `~/.stop_ros.sh` then `ros2 launch sdk armpi_ultra.launch.py`.
-- Test with no mic: `ros2 topic pub --once /voice_words std_msgs/msg/String "{data: 'turn right'}"`.
-- **Left/right are defined from the OPERATOR's view** (mirrors the robot frame):
-  `left = servo6→800`, `right = servo6→200`. Fixed this session after it ran reversed.
+## 3. What's built and working (as of today)
 
-## Calibration state (color pick)
+### Remote live video — `camera_stream.py`
+MJPEG-over-HTTP server: subscribes to the camera RGB topic, serves frames to a browser.
+View at `http://192.168.137.<pi>:8080` from the PC. Lets you watch the arm remotely
+(laggy — good for confirming a gesture, not judging fast motion).
 
-- `object_sorting` **re-reads `calibration.yaml` on every grasp** — tune live, no restart.
-- Axis mapping found via single-variable probes: **+X (`offset[0]`) = "forward/up" in the
-  camera image; +Y (`offset[1]`) = "left" in the image.** Both move the gripper ~linearly.
-- **Working baseline left in `~/ros2_ws/src/app/config/calibration.yaml`:**
-  `kinematics.offset = [-0.005, -0.065, 0.005]`, `kinematics.scale = [1.0, 1.07, 1.0]`.
-  `depth`/`pixel` sections unchanged. (This file is Pi-only — copy into the repo to
-  version it.)
-- **Why it's not finished:** near-misses physically nudge the block so it drifts, and the
-  underlying hand-eye transform has residual position-dependent error. A constant offset
-  can't fix a position-dependent error — hence the `tool.sh` recalibration is still needed.
-- Don't repeat the old YAML-thrash: `kinematics.offset` is post-hoc; the `scale` factors
-  (Y was 1.07) make the error position-dependent and fight each other. Recalibrate first.
+### The conversational + motion agent — `armpi_voice/arm_agent.py`
+An LLM **agent** (not just a classifier). Each turn it returns
+`{"steps": [...], "say": "..."}`:
+- **`say`** → always published on `/robot_speech` (spoken by TTS) and shown in the chat.
+- **`steps`** → an *ordered* list executed one-by-one. Each step is either:
+  - a named gesture: `{"action":"home"}` (home/left/right/open/close/nod), or
+  - a parametric move: `{"action":"move","moves":[{"servo":N,"target":T}|{"servo":N,"delta":D}]}`.
+- Tracks each servo's position so **relative deltas** ("up a bit", "a bit more") and
+  **chained steps** resolve against the running state.
+- Keeps a short rolling conversation memory.
+- Works: `"go home, then turn the base right about 100, then raise motor 4 by 300"` runs
+  as a sequence; `"turn halfway right"`, `"nod and open the gripper"`, plain chat — all work.
 
-## Key file paths
+### The one-terminal chat — `arm_console.py` + `chat.sh`
+`bash chat.sh` starts SDK (servo controller) + `arm_agent` + `tts_node` in the
+background, then drops you into a turn-based chat prompt (`arm_console`). Quitting tears
+everything down. This is the normal way to drive the robot now.
 
-- `camera_stream.py` — repo root + `~/ros2_ws/camera_stream.py` on the Pi
-- `armpi_voice/armpi_voice/arm_agent.py` — the agent (new); `voice_arm_control.py` — old classifier
-- `~/ros2_ws/src/app/app/object_sorting.py` — the pick-and-place node
-- `~/ros2_ws/src/app/config/calibration.yaml` — live-reloaded grasp offsets
-- `~/software/calibration/tool.sh` — hand-eye calibration GUI (lab + VNC)
+### Voice output (Wk 4) — `armpi_voice/tts_node.py`
+Subscribes `/robot_speech`, speaks each reply. Two engines: **espeak-ng** (offline,
+robotic) and **piper** (neural, natural — installed via `install_piper.sh`, voice
+`en_US-amy-medium` at `~/piper/`). Speaker = **USB PnP audio = ALSA card 2 =
+`plughw:2,0`** (cards 0/1 are HDMI). `chat.sh` auto-prefers piper, routes to card 2.
+**End state: type → arm moves → robot speaks naturally.**
 
-## Gotchas worth remembering
+## 4. What is NOT done / parked
 
-- **Camera feed is laggy** over the remote-desktop→PC→Pi chain — good for confirming a
-  gesture happened, not for judging fast motion or sub-cm grasp error. Trust the node
-  logs (`Published servo positions: ...`) over the video.
-- **ICS DNS** drops easily on the remote PC — symptom is `curl` to the API timing out at
-  DNS ("Resolving timed out"). Re-arm sharing on the PC's internet adapter, point it at
-  the `192.168.137.x` LAN adapter.
-- Multi-line **terminal paste mangles heredocs/long commands** — use VS Code to create
-  files on the Pi instead.
-- The Pi-side copy of repo files is **separate** from the laptop repo — edits here need
-  `git pull` (or manual re-paste) on the Pi. `--symlink-install` means pure-Python edits
-  take effect on node restart without a rebuild.
-- Camera topics need **`qos_profile_sensor_data`** or a subscriber silently gets nothing.
+- **Color pick-and-place calibration** — the vision→IK→grasp chain runs end-to-end on the
+  stock `object_sorting` demo, but the gripper lands off the block (hand-eye drift). Remote
+  offset-tuning got it from ~2 blocks off to grazing, but can't finish: near-misses nudge
+  the block, and the error is partly position-dependent. **Real fix = hand-eye calibration
+  tool `~/software/calibration/tool.sh` (GUI → needs VNC + physically placing a calibration
+  board) — a LAB job.** Working baseline left in `calibration.yaml`:
+  `kinematics.offset = [-0.005, -0.065, 0.005]`, `scale = [1.0, 1.07, 1.0]`.
+- **Voice INPUT (STT)** — not started. The agent already listens on `/voice_words`; a
+  faster-whisper node publishing transcripts there closes the loop (the chat console and a
+  mic are interchangeable front-ends).
+- **Manipulation skills** — `pick(color)`/`place(location)` not yet refactored out of
+  `object_sorting.py`; gated on calibration.
 
-## The goal (unchanged)
+## 5. Servo facts
 
-Voice/chat → LLM agent that acts OR converses. Gestures + conversation now work
-remotely. Remaining: reliable manipulation (`pick`/`place`, gated on calibration) and
-voice in/out (faster-whisper STT + TTS on `/robot_speech`).
+Raw units **0–1000, 500 = centre**. Hard mechanical limits — test new ranges small.
+- **servo 6 = base rotation.** Operator's view: **right = lower (~200), left = higher
+  (~800)** — defined this way after it ran mirrored. Relative "right" = negative delta.
+- **servo 1 = gripper:** open ~200, closed ~500.
+- **servos 2–5 = arm joints** (shoulder/elbow/wrist) — exact map + "up/down" direction
+  **unverified**. Convention in the prompt: up = +delta, down = −delta; if a joint goes the
+  wrong way, tell the agent "other way" (and we should verify + bake in real directions).
+
+## 6. Key file paths
+
+Laptop repo (this Windows folder, pushed to GitHub `trihieu0510/Summer-Research---VLA-ArmPi-Ultra`):
+- `armpi_voice/armpi_voice/arm_agent.py` — the agent (steps schema)
+- `armpi_voice/armpi_voice/arm_console.py` — the chat REPL
+- `armpi_voice/armpi_voice/tts_node.py` — voice output
+- `armpi_voice/chat.sh` — one-command launcher
+- `install_pi.sh` / `install_piper.sh` — pull-from-GitHub installers (avoid clipboard)
+- `camera_stream.py` — remote MJPEG feed
+- `Documents/COMMANDS.md` — the operational cheat sheet
+
+On the Pi:
+- `~/ros2_ws/src/armpi_voice/...` — the package (separate from the repo; sync via install_pi.sh)
+- `~/ros2_ws/camera_stream.py`, `~/piper/` (piper bin + voice), `~/.armpi_key` (DeepSeek key)
+- `~/ros2_ws/src/app/...` — the pick-and-place demo + `config/calibration.yaml`
+
+## 7. Gotchas worth remembering
+
+- **Never paste code into the Pi terminal/editor** — clipboard corrupts it. Push to GitHub,
+  pull with `curl` (`install_pi.sh`). Cache-bust the raw URL (`?v=$(date +%s)`) — the CDN
+  caches a few minutes.
+- **`~/.stop_ros.sh` is a nuke** (`ps|grep ros|kill -9`) — it kills anything with "ros" in
+  its command line, including scripts under `~/ros2_ws/` and the camera. `chat.sh` now does a
+  surgical version that spares the camera + itself.
+- **DeepSeek key** is read from `~/.armpi_key` (never commit it). It was exposed in chat once
+  — rotate it.
+- **Camera feed is laggy** over remote desktop; trust the agent's `Published servo positions`
+  log over the video.
+- **Background logs** when using chat.sh: `/tmp/armpi_sdk.log`, `/tmp/armpi_agent.log`,
+  `/tmp/armpi_tts.log`.
+
+## 8. Recommended next steps
+
+1. **Remote, high-value:** add **speech-to-text** (faster-whisper) publishing to
+   `/voice_words` → full hands-free voice loop (mic → reason → move → speak).
+2. **Remote:** verify servo 2–5 "up/down" directions and bake correct conventions into the
+   agent prompt.
+3. **In lab:** run `tool.sh` hand-eye calibration, finish reliable color pick, then refactor
+   into `pick(color)`/`place(location)` and let the agent call them.
