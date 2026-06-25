@@ -100,3 +100,15 @@ Concluded: need the proper hand-eye calibration tool, not YAML tuning.
 
 Next session:Run ~/software/calibration/tool.sh (GUI — needs VNC) to fix the hand-eye transform. Then re-test color pick.
 Status: Full manipulation chain validated. Calibration tooling is the only thing between current state and reliable pick-and-place.
+
+25/06
+- First fully REMOTE session — controlling a PC that's LAN-connected to the Pi (me -> remote desktop -> PC -> LAN -> Pi container). No physical access to the robot.
+- Built camera_stream.py: a tiny MJPEG-over-HTTP server that subscribes to the camera topic and serves the feed to a browser. Now I can watch the robot remotely at http://192.168.137.x:8080 from the PC. Uses only rclpy/cv_bridge/cv2 (no installs). Gotcha: camera topics need sensor_data QoS or you get no frames.
+- Tried to fix the color-pick calibration remotely. Key find: object_sorting re-reads calibration.yaml on EVERY grasp, so I can tune kinematics.offset live with no node restart. Mapped image->robot axes with single-variable probes (+X = forward in image; +Y = left in image). Walked the gripper from ~2 blocks off to grazing dead-centre.
+- Hit the remote ceiling: each near-miss nudges the block so it walks away, and there's residual position-dependent hand-eye error. Constant offsets can't fully fix that. Proper fix stays the hand-eye tool.sh (GUI/VNC + physical calibration board) when back in the lab. Saved working baseline: kinematics.offset = [-0.005, -0.065, 0.005], scale [1.0,1.07,1.0]; depth/pixel unchanged.
+- Pivoted to Wk 3 (works fine remotely, no precise grip needed). Built arm_agent.py: an LLM AGENT (vs the old classifier) that each turn returns {"action","say"} — so it moves, talks, or both. Has rolling conversation memory and publishes spoken replies on /robot_speech (the seam for next week's TTS). Kept the old voice_arm_control.py as a fallback.
+- Fixed the Pi's internet (ICS wasn't forwarding DNS from the new PC — re-armed sharing). Pointed arm_agent at DeepSeek cloud (deepseek-chat).
+- Tested end-to-end: "what can you do?" -> conversational reply, no motion. "turn left/right" -> base servo moves. DeepSeek returns clean JSON every time. Fixed left/right being mirrored (defined them from the operator/camera view: left=800, right=200 on servo 6).
+
+Next session: re-test the calibrated color pick IN THE LAB and run the hand-eye tool.sh. Remotely: add TTS subscriber on /robot_speech (Wk 4), and consider refactoring object_sorting into a callable pick(color) skill (Wk 2) so the agent can eventually call it.
+Status: Wk 3 agent (gestures + conversation) working over the network. Calibration parked on physical access.

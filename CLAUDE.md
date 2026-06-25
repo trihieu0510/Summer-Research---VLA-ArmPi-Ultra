@@ -12,7 +12,7 @@ A summer research project building **voice-controlled robotic manipulation** on 
 The chosen architecture is a **modular pipeline** (not an end-to-end VLA), staged as:
 `Speech-to-Text → Scene perception (YOLOv8 + depth + hand-eye calibration) → LLM reasoning (→ JSON action) → Inverse kinematics → Servo motion → Vision-based verification`
 
-`Documents/ArmPi_Ultra_VLA_Roadmap.pdf` is the authoritative 6-phase plan (Phase 0 prerequisites → Phase 5 evaluation, Phase 6 stretch = SmolVLA fine-tuning). `Documents/Research Proposal.pdf` is the formal proposal. Read the roadmap before making architectural decisions — phases have explicit exit criteria and are meant to be done in order.
+`Documents/session_handoff_*.md` is the most recent state-of-the-project handoff (current blocker, next task, gotchas). `Documents/Generated_Action_Plan.md` is the web-researched, device-verified action plan. Read the latest handoff before making decisions — it reflects the real current state of the hardware.
 
 ## Two-machine workflow (critical)
 
@@ -54,10 +54,10 @@ Confirm the live topic/message type with `ros2 topic list` / `ros2 interface sho
 
 ## Key file: voice_arm_control.py
 
-A ROS 2 node (`VoiceArmController`) that subscribes to `/voice_words`, sends the transcript to a **local Qwen LLM via Ollama** (`http://localhost:11434/v1`, model `qwen:0.5b`, `temperature=0.0`), and maps the returned JSON `{"action": ...}` to fixed servo poses (`home`/`left`/`right`/`open`/`close`/`nod`). Note this is a local-LLM substitution for the roadmap's suggested cloud reasoning stage (GPT-4o-mini / Claude). Comments and log strings are in Vietnamese.
+A ROS 2 node (`VoiceArmController`) that subscribes to `/voice_words`, sends the transcript to a **local Qwen LLM via Ollama** (`http://localhost:11434/v1`, model `qwen:0.5b`, `temperature=0.0`), and maps the returned JSON `{"action": ...}` to fixed servo poses (`home`/`left`/`right`/`open`/`close`/`nod`). Comments and log strings are in Vietnamese. (The bundled `large_models` pipeline on the Pi was since repointed to the DeepSeek cloud API — confirm which LLM backend is live before assuming.)
 
 ## Conventions
 
 - One virtualenv per machine/phase; `venv/` and `armpi/` (both Windows Python 3.13) are laptop-side warm-up envs and are **not** the Pi's runtime — never reason about Pi dependencies from them. Never `sudo pip install` globally on the Pi.
-- `Daily Update.txt` is the running work journal (the roadmap's `JOURNAL.md` practice). Add a dated entry when you make meaningful progress.
+- `Daily Update.txt` is the running work journal. Add a dated entry when you make meaningful progress.
 - Git: remote is `origin` on GitHub (`trihieu0510/Summer-Research`), default branch `master`. Commit per working increment.

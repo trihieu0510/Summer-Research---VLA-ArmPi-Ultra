@@ -22,6 +22,7 @@ setup(
         'console_scripts': [
             # command name = module path : function
             'voice_arm_control = armpi_voice.voice_arm_control:main',
+            'arm_agent = armpi_voice.arm_agent:main',
         ],
     },
 )
