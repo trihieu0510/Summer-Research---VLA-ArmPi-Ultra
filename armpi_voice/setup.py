@@ -24,6 +24,7 @@ setup(
             'voice_arm_control = armpi_voice.voice_arm_control:main',
             'arm_agent = armpi_voice.arm_agent:main',
             'arm_console = armpi_voice.arm_console:main',
+            'tts_node = armpi_voice.tts_node:main',
         ],
     },
 )

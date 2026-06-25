@@ -21,6 +21,7 @@ curl -fsSL "$BASE/armpi_voice/setup.py$V"                  -o "$PKG/setup.py"
 curl -fsSL "$BASE/armpi_voice/chat.sh$V"                   -o "$PKG/chat.sh"
 curl -fsSL "$BASE/armpi_voice/armpi_voice/arm_console.py$V" -o "$PKG/armpi_voice/arm_console.py"
 curl -fsSL "$BASE/armpi_voice/armpi_voice/arm_agent.py$V"   -o "$PKG/armpi_voice/arm_agent.py"
+curl -fsSL "$BASE/armpi_voice/armpi_voice/tts_node.py$V"    -o "$PKG/armpi_voice/tts_node.py"
 
 echo "Building armpi_voice..."
 cd "$HOME/ros2_ws"

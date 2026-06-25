@@ -33,6 +33,7 @@ source /opt/ros/humble/setup.bash 2>/dev/null || true
 cleanup() {
     echo
     echo "Shutting down background services..."
+    [ -n "${TTS_PID:-}" ]   && kill "$TTS_PID" 2>/dev/null
     [ -n "${AGENT_PID:-}" ] && kill "$AGENT_PID" 2>/dev/null
     [ -n "${SDK_PID:-}" ]   && kill -INT "$SDK_PID" 2>/dev/null
     wait 2>/dev/null
@@ -62,6 +63,16 @@ ros2 run armpi_voice arm_agent --ros-args \
     -p base_url:=https://api.deepseek.com -p model:=deepseek-chat \
     >/tmp/armpi_agent.log 2>&1 &
 AGENT_PID=$!
+
+# Voice output (TTS) — only if an engine is installed, so a missing engine never
+# breaks the chat. Speaks whatever the agent publishes on /robot_speech.
+if command -v espeak-ng >/dev/null 2>&1 || command -v piper >/dev/null 2>&1; then
+    echo "Starting voice output (TTS)..."
+    ros2 run armpi_voice tts_node >/tmp/armpi_tts.log 2>&1 &
+    TTS_PID=$!
+else
+    echo "(No TTS engine found — skipping voice output. Install with: apt-get install espeak-ng)"
+fi
 
 echo "Waiting ~8s for hardware + agent to come up..."
 sleep 8
