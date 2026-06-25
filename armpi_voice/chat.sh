@@ -64,16 +64,25 @@ ros2 run armpi_voice arm_agent --ros-args \
     >/tmp/armpi_agent.log 2>&1 &
 AGENT_PID=$!
 
-# Voice output (TTS) — only if an engine is installed, so a missing engine never
-# breaks the chat. Speaks whatever the agent publishes on /robot_speech.
-if command -v espeak-ng >/dev/null 2>&1 || command -v piper >/dev/null 2>&1; then
-    echo "Starting voice output (TTS)..."
-    # Route to the USB speaker (card 2) by default; override with ARMPI_TTS_DEVICE.
+# Voice output (TTS) — prefer piper (natural) if installed, else espeak (robotic),
+# else skip. A missing engine never breaks the chat. Route to the USB speaker
+# (card 2) by default; override with ARMPI_TTS_DEVICE.
+DEV="${ARMPI_TTS_DEVICE:-plughw:2,0}"
+PIPER_BIN="$HOME/piper/piper"
+PIPER_MODEL="$HOME/piper/en_US-amy-medium.onnx"
+if [ -x "$PIPER_BIN" ] && [ -f "$PIPER_MODEL" ]; then
+    echo "Starting voice output (piper — natural voice)..."
     ros2 run armpi_voice tts_node --ros-args \
-        -p alsa_device:="${ARMPI_TTS_DEVICE:-plughw:2,0}" >/tmp/armpi_tts.log 2>&1 &
+        -p engine:=piper -p piper_bin:="$PIPER_BIN" -p piper_model:="$PIPER_MODEL" \
+        -p alsa_device:="$DEV" >/tmp/armpi_tts.log 2>&1 &
+    TTS_PID=$!
+elif command -v espeak-ng >/dev/null 2>&1; then
+    echo "Starting voice output (espeak)..."
+    ros2 run armpi_voice tts_node --ros-args \
+        -p alsa_device:="$DEV" >/tmp/armpi_tts.log 2>&1 &
     TTS_PID=$!
 else
-    echo "(No TTS engine found — skipping voice output. Install with: apt-get install espeak-ng)"
+    echo "(No TTS engine found — skipping voice. Install espeak-ng or run install_piper.sh.)"
 fi
 
 echo "Waiting ~8s for hardware + agent to come up..."

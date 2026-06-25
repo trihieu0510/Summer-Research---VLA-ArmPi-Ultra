@@ -43,6 +43,7 @@ class TTSNode(Node):
         self.declare_parameter('voice', 'en+f3')          # espeak voice name
         self.declare_parameter('rate', 160)               # espeak words/minute
         self.declare_parameter('piper_model', '')         # .onnx path for piper
+        self.declare_parameter('piper_bin', 'piper')      # piper executable (e.g. ~/piper/piper)
         # ALSA output device, e.g. 'plughw:2,0' for the USB speaker (card 2).
         # Empty = system default (often HDMI, which won't reach the speaker).
         self.declare_parameter('alsa_device', '')
@@ -52,6 +53,7 @@ class TTSNode(Node):
         self.voice = self.get_parameter('voice').value
         self.rate = int(self.get_parameter('rate').value)
         self.piper_model = self.get_parameter('piper_model').value
+        self.piper_bin = self.get_parameter('piper_bin').value
         self.alsa_device = self.get_parameter('alsa_device').value
 
         # Serialize utterances on a worker thread so playback never blocks the
@@ -102,7 +104,7 @@ class TTSNode(Node):
                 return
             # piper synthesizes a WAV to stdout; pipe it straight to aplay.
             piper = subprocess.Popen(
-                ['piper', '--model', self.piper_model, '--output_file', '-'],
+                [self.piper_bin, '--model', self.piper_model, '--output_file', '-'],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             )
             aplay = subprocess.Popen(self._aplay_cmd(), stdin=piper.stdout)
