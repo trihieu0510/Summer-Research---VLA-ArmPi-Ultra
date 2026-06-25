@@ -1,3 +1,6 @@
+import os
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = 'armpi_voice'
@@ -10,6 +13,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        # Install launch files so `ros2 launch armpi_voice <file>` can find them.
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -23,6 +28,7 @@ setup(
             # command name = module path : function
             'voice_arm_control = armpi_voice.voice_arm_control:main',
             'arm_agent = armpi_voice.arm_agent:main',
+            'arm_console = armpi_voice.arm_console:main',
         ],
     },
 )
