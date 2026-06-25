@@ -12,7 +12,8 @@
 #     echo "sk-your-key-here" > ~/.armpi_key
 # Background logs (for debugging): /tmp/armpi_sdk.log and /tmp/armpi_agent.log
 
-set -u
+# Note: deliberately NOT using `set -u` — sourcing ROS 2 setup scripts trips
+# over unset variables and would abort the whole script.
 
 # --- API key, from ~/.armpi_key (never committed) ---
 if [ -f "$HOME/.armpi_key" ]; then
