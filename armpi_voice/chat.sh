@@ -40,8 +40,17 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "Freeing the STM32 serial port..."
-[ -x "$HOME/.stop_ros.sh" ] && "$HOME/.stop_ros.sh"
+echo "Freeing the STM32 serial port (stopping the autostart)..."
+# NOTE: ~/.stop_ros.sh does `ps aux | grep ros | ... kill -9`, which kills EVERY
+# process whose command line contains "ros" — including THIS script, because its
+# path contains "ros2_ws" (that's the mysterious "Killed"). So we replicate the
+# intent but skip our own PID and parent.
+for pid in $(ps -eo pid=,args= | grep -i '[r]os' | awk '{print $1}'); do
+    [ "$pid" = "$$" ] && continue
+    [ "$pid" = "$PPID" ] && continue
+    kill -9 "$pid" 2>/dev/null
+done
+sleep 1   # let the serial port actually release before we grab it
 
 echo "Starting arm hardware (sdk armpi_ultra.launch.py)..."
 ros2 launch sdk armpi_ultra.launch.py >/tmp/armpi_sdk.log 2>&1 &
