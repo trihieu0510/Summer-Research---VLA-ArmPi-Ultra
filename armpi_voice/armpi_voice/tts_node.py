@@ -43,12 +43,16 @@ class TTSNode(Node):
         self.declare_parameter('voice', 'en+f3')          # espeak voice name
         self.declare_parameter('rate', 160)               # espeak words/minute
         self.declare_parameter('piper_model', '')         # .onnx path for piper
+        # ALSA output device, e.g. 'plughw:2,0' for the USB speaker (card 2).
+        # Empty = system default (often HDMI, which won't reach the speaker).
+        self.declare_parameter('alsa_device', '')
 
         self.speech_topic = self.get_parameter('speech_topic').value
         self.engine = self.get_parameter('engine').value
         self.voice = self.get_parameter('voice').value
         self.rate = int(self.get_parameter('rate').value)
         self.piper_model = self.get_parameter('piper_model').value
+        self.alsa_device = self.get_parameter('alsa_device').value
 
         # Serialize utterances on a worker thread so playback never blocks the
         # executor and replies don't overlap into garbled audio.
@@ -85,6 +89,12 @@ class TTSNode(Node):
             finally:
                 self._q.task_done()
 
+    def _aplay_cmd(self):
+        cmd = ['aplay', '-q']
+        if self.alsa_device:
+            cmd += ['-D', self.alsa_device]   # route to a specific card, e.g. plughw:2,0
+        return cmd + ['-']
+
     def _speak(self, text: str) -> None:
         if self.engine == 'piper':
             if not self.piper_model:
@@ -95,11 +105,21 @@ class TTSNode(Node):
                 ['piper', '--model', self.piper_model, '--output_file', '-'],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             )
-            aplay = subprocess.Popen(['aplay', '-q', '-'], stdin=piper.stdout)
+            aplay = subprocess.Popen(self._aplay_cmd(), stdin=piper.stdout)
             piper.stdin.write(text.encode())
             piper.stdin.close()
             aplay.wait()
+        elif self.alsa_device:
+            # espeak-ng -> WAV on stdout -> aplay on the chosen device.
+            espeak = subprocess.Popen(
+                ['espeak-ng', '-s', str(self.rate), '-v', self.voice, '--stdout', text],
+                stdout=subprocess.PIPE,
+            )
+            aplay = subprocess.Popen(self._aplay_cmd(), stdin=espeak.stdout)
+            espeak.stdout.close()
+            aplay.wait()
         else:
+            # Default ALSA device.
             subprocess.run(
                 ['espeak-ng', '-s', str(self.rate), '-v', self.voice, text],
                 check=False,

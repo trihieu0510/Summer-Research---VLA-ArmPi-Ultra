@@ -68,7 +68,9 @@ AGENT_PID=$!
 # breaks the chat. Speaks whatever the agent publishes on /robot_speech.
 if command -v espeak-ng >/dev/null 2>&1 || command -v piper >/dev/null 2>&1; then
     echo "Starting voice output (TTS)..."
-    ros2 run armpi_voice tts_node >/tmp/armpi_tts.log 2>&1 &
+    # Route to the USB speaker (card 2) by default; override with ARMPI_TTS_DEVICE.
+    ros2 run armpi_voice tts_node --ros-args \
+        -p alsa_device:="${ARMPI_TTS_DEVICE:-plughw:2,0}" >/tmp/armpi_tts.log 2>&1 &
     TTS_PID=$!
 else
     echo "(No TTS engine found — skipping voice output. Install with: apt-get install espeak-ng)"
