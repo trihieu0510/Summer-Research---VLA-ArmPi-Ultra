@@ -4,17 +4,18 @@ arm_agent.py
 ============
 Conversational + motion agent for the Hiwonder ArmPi Ultra (6-DOF arm).
 
-Each turn the LLM decides to either PERFORM AN ACTION, just TALK, or both, and
-keeps a short rolling memory so a back-and-forth chat stays coherent.
+Each turn the LLM returns an ordered list of STEPS to perform (gestures and/or
+per-servo moves), plus a spoken reply. Steps run sequentially, so you can chain
+commands like "go home, then turn the base right 100, then raise motor 4 by 300".
+It keeps a short rolling memory so a back-and-forth chat stays coherent.
 
-Two kinds of actions:
-  * Named gestures   — home / left / right / open / close / nod (fixed poses).
-  * Parametric moves — "action": "move" with a list of per-servo targets/deltas,
-    so commands like "turn halfway right" or "move motor 3 up a bit" work.
+Step kinds:
+  * Named gesture   — {"action": "home"} (home/left/right/open/close/nod).
+  * Parametric move — {"action": "move", "moves": [{"servo": N, "target"|"delta": V}, ...]}.
 
 Data flow:
     /voice_words (std_msgs/String)        text command (typed console or STT)
-        -> LLM (OpenAI-compatible)        -> {"action", "moves", "say"}
+        -> LLM (OpenAI-compatible)        -> {"steps": [...], "say": "..."}
         -> /ros_robot_controller/bus_servo/set_position   (ServosPosition)
         -> /robot_speech (std_msgs/String)                 the spoken reply
 
@@ -48,7 +49,7 @@ from openai import OpenAI
 # mechanical limits; commanding outside them can damage the hardware.
 SERVO_MIN = 0
 SERVO_MAX = 1000
-MOVE_DURATION = 1.0           # seconds per parametric move
+MOVE_DURATION = 1.0           # seconds per parametric move step
 MAX_DELTA = 300               # clamp a single relative nudge so the arm can't lurch
 
 HOME_POSE = [(1, 500), (2, 500), (3, 500), (4, 500), (5, 500), (6, 500)]
@@ -67,7 +68,7 @@ ACTIONS = {
 
 
 class ArmAgent(Node):
-    """An LLM agent that drives ArmPi Ultra gestures/moves or holds a conversation."""
+    """An LLM agent that runs ArmPi Ultra gesture/move sequences or holds a conversation."""
 
     def __init__(self) -> None:
         super().__init__('arm_agent')
@@ -100,8 +101,8 @@ class ArmAgent(Node):
         self.system_prompt = self._build_system_prompt()
         self.get_logger().info(f'LLM reasoning via "{self.model_name}" at {base_url}')
 
-        # Track each servo's last-known position so RELATIVE moves ("up a bit") work.
-        # Starts at home (all 500); updated whenever we publish a command.
+        # Track each servo's last-known position so RELATIVE moves ("up a bit") work,
+        # and so chained steps resolve their deltas against the running state.
         self.current = {sid: pos for sid, pos in HOME_POSE}
 
         self._history: "deque[dict]" = deque(maxlen=max(0, history_turns) * 2)
@@ -132,33 +133,33 @@ class ArmAgent(Node):
     def _build_system_prompt(self) -> str:
         return (
             "You are the mind of a friendly 6-servo robotic arm (Hiwonder ArmPi Ultra). "
-            "Each turn you either PERFORM an action, just TALK, or both.\n\n"
+            "Each turn you return an ordered list of movement STEPS to perform (possibly "
+            "empty for pure conversation) and a short spoken reply.\n\n"
             "SERVOS: ids 1-6, raw units 0-1000, 500 = centre. Known mapping:\n"
-            "  - servo 6 = base rotation. From the operator's view: right is LOWER "
-            "(~200), left is HIGHER (~800), centre 500.\n"
+            "  - servo 6 = base rotation. Operator's view: RIGHT is LOWER (toward 200), "
+            "LEFT is HIGHER (toward 800). So a relative 'right' = NEGATIVE delta, "
+            "'left' = POSITIVE delta.\n"
             "  - servo 1 = gripper: open ~200, closed ~500.\n"
-            "  - servos 2-5 = arm joints (shoulder/elbow/wrist), exact mapping unverified.\n\n"
-            "NAMED GESTURES (use for simple whole-arm commands):\n"
-            '  "home", "left", "right", "open", "close", "nod".\n\n'
-            "PARAMETRIC MOVES (use action \"move\" for partial/relative/per-servo commands). "
-            "Provide a \"moves\" list; each item is either absolute or relative:\n"
-            '  - absolute: {"servo": <1-6>, "target": <0-1000>}\n'
-            '  - relative: {"servo": <1-6>, "delta": <signed amount>}\n'
-            "Guidance: 'halfway to the right' on the base = target ~350 (between centre 500 "
-            "and right 200). 'a little' ~ 80-120 units. 'up/raise' = positive delta, "
-            "'down/lower' = negative delta (~120). Keep any single move modest (<=300 units). "
-            "You may list several servos at once.\n\n"
-            "OTHERWISE just chat: set \"action\" to \"none\" and reply in \"say\".\n\n"
-            "Always respond with ONLY a JSON object: "
-            '{"action": "<home|left|right|open|close|nod|move|none>", '
-            '"moves": [ ... only when action is \"move\" ... ], '
-            '"say": "<short spoken reply, 1-2 sentences>"}.\n'
+            "  - servos 2-5 = arm joints (shoulder/elbow/wrist); 'up/raise' = POSITIVE "
+            "delta, 'down/lower' = NEGATIVE delta (~120 for 'a bit'). Exact mapping unverified.\n\n"
+            "EACH STEP is one of:\n"
+            '  - a named gesture: {"action": "home"}  (home/left/right/open/close/nod)\n'
+            '  - a parametric move: {"action": "move", "moves": [ '
+            '{"servo": <1-6>, "target": <0-1000>}  OR  {"servo": <1-6>, "delta": <signed>} ]}\n'
+            "Steps run in order, one after another, so chain them for sequences. Servos listed "
+            "together inside ONE move happen simultaneously. Keep any single delta <=300.\n\n"
+            "Respond with ONLY a JSON object: "
+            '{"steps": [ ...ordered steps... ], "say": "<reply, 1-2 sentences>"}.\n'
             "Examples:\n"
-            '  "turn halfway to the right" -> {"action":"move","moves":[{"servo":6,"target":350}],"say":"Turning halfway right."}\n'
-            '  "move motor 3 up a bit" -> {"action":"move","moves":[{"servo":3,"delta":120}],"say":"Raising joint 3."}\n'
-            '  "nudge the base left a little" -> {"action":"move","moves":[{"servo":6,"delta":120}],"say":"Nudging left."}\n'
-            '  "open your gripper" -> {"action":"open","say":"Opening up."}\n'
-            '  "what can you do?" -> {"action":"none","say":"I can turn, nod, grip, and move each joint to a position."}'
+            '  "go home, then turn the base right about 100, then raise motor 4 by 300" -> '
+            '{"steps":[{"action":"home"},{"action":"move","moves":[{"servo":6,"delta":-100}]},'
+            '{"action":"move","moves":[{"servo":4,"delta":300}]}],"say":"Homing, then base right 100, then joint 4 up 300."}\n'
+            '  "turn halfway to the right" -> '
+            '{"steps":[{"action":"move","moves":[{"servo":6,"target":350}]}],"say":"Turning halfway right."}\n'
+            '  "nod and open your gripper" -> '
+            '{"steps":[{"action":"nod"},{"action":"open"}],"say":"Nodding, then opening up."}\n'
+            '  "what can you do?" -> '
+            '{"steps":[],"say":"I can turn, nod, grip, move each joint, and chain those into sequences."}'
         )
 
     # --- ROS callback (runs on the executor thread; must stay fast) ---------------
@@ -177,14 +178,11 @@ class ArmAgent(Node):
             except queue.Empty:
                 continue
             try:
-                action, moves, say = self._reason(text)
-                self.get_logger().info(f'Decided -> action={action!r}, moves={moves}, say={say!r}')
+                steps, say = self._reason(text)
+                self.get_logger().info(f'Decided -> steps={steps}, say={say!r}')
                 if say:
                     self._speak(say)
-                if action == 'move':
-                    self.execute_moves(moves)
-                elif action in ACTIONS:
-                    self.execute_action(action)
+                self.execute_steps(steps)
             except Exception as exc:  # network error, malformed response, etc.
                 self.get_logger().error(f'Failed to handle turn "{text}": {exc}')
             finally:
@@ -192,7 +190,7 @@ class ArmAgent(Node):
 
     # --- LLM reasoning ------------------------------------------------------------
     def _reason(self, text: str):
-        """Send the turn (with rolling history) to the LLM; return (action, moves, say)."""
+        """Send the turn (with rolling history) to the LLM; return (steps, say)."""
         messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(self._history)
         messages.append({"role": "user", "content": text})
@@ -205,31 +203,47 @@ class ArmAgent(Node):
         )
         content = (response.choices[0].message.content or "").strip()
         self.get_logger().info(f'LLM response: {content}')
-        action, moves, say = self._parse_reply(content)
+        steps, say = self._parse_reply(content)
 
         self._history.append({"role": "user", "content": text})
         self._history.append({"role": "assistant", "content": content})
-        return action, moves, say
+        return steps, say
 
     @staticmethod
     def _parse_reply(content: str):
-        """Extract (action, moves, say) from the LLM reply. Tolerant of fences / <think>."""
+        """Extract (steps, say) from the LLM reply. Tolerant of fences / <think> and of
+        the older single-action form (wrapped into a one-element step list)."""
         content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
         match = re.search(r"\{.*\}", content, flags=re.DOTALL)
         if not match:
-            return "none", [], content.strip() or ""
+            return [], content.strip() or ""
         try:
             reply = json.loads(match.group(0))
         except json.JSONDecodeError:
-            return "none", [], ""
-        action = reply.get("action", "none")
-        moves = reply.get("moves", []) or []
-        if not isinstance(moves, list):
-            moves = []
+            return [], ""
+
         say = str(reply.get("say", "")).strip()
-        if action != "move" and action not in ACTIONS:
-            action = "none"
-        return action, moves, say
+
+        raw_steps = reply.get("steps")
+        if not isinstance(raw_steps, list):
+            # Backward compatibility: accept a single top-level {"action", "moves"}.
+            if reply.get("action"):
+                raw_steps = [{"action": reply.get("action"), "moves": reply.get("moves", [])}]
+            else:
+                raw_steps = []
+
+        steps = []
+        for s in raw_steps:
+            if not isinstance(s, dict):
+                continue
+            action = s.get("action", "none")
+            if action == "move":
+                moves = s.get("moves", []) or []
+                if isinstance(moves, list) and moves:
+                    steps.append({"action": "move", "moves": moves})
+            elif action in ACTIONS:
+                steps.append({"action": action})
+        return steps, say
 
     # --- Speech output ------------------------------------------------------------
     def _speak(self, text: str) -> None:
@@ -237,8 +251,16 @@ class ArmAgent(Node):
         self.get_logger().info(f'🗣  {text}')
 
     # --- Motion -------------------------------------------------------------------
+    def execute_steps(self, steps) -> None:
+        """Run an ordered list of gesture/move steps, one after another."""
+        for step in steps:
+            if step["action"] == "move":
+                self.execute_moves(step["moves"])
+            else:
+                self.execute_action(step["action"])
+
     def execute_moves(self, moves) -> None:
-        """Execute parametric per-servo moves (absolute target or relative delta)."""
+        """Execute one parametric move (absolute target or relative delta per servo)."""
         positions = []
         for m in moves:
             try:
