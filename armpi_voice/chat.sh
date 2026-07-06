@@ -67,10 +67,13 @@ AGENT_PID=$!
 # Voice output (TTS) — prefer piper (natural) if installed, else espeak (robotic),
 # else skip. A missing engine never breaks the chat. Route to the USB speaker
 # (card 2) by default; override with ARMPI_TTS_DEVICE.
+# Set ARMPI_NO_TTS=1 to start with voice OFF (quiet — e.g. shared room / lab).
 DEV="${ARMPI_TTS_DEVICE:-plughw:2,0}"
 PIPER_BIN="$HOME/piper/piper"
 PIPER_MODEL="$HOME/piper/en_US-amy-medium.onnx"
-if [ -x "$PIPER_BIN" ] && [ -f "$PIPER_MODEL" ]; then
+if [ -n "${ARMPI_NO_TTS:-}" ]; then
+    echo "(ARMPI_NO_TTS set — voice output OFF.)"
+elif [ -x "$PIPER_BIN" ] && [ -f "$PIPER_MODEL" ]; then
     echo "Starting voice output (piper — natural voice)..."
     ros2 run armpi_voice tts_node --ros-args \
         -p engine:=piper -p piper_bin:="$PIPER_BIN" -p piper_model:="$PIPER_MODEL" \
