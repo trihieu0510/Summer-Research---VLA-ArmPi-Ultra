@@ -83,7 +83,7 @@ ros2 launch sdk armpi_ultra.launch.py
 
 # Terminal 2 — the agent (export the key first):
 export LLM_API_KEY="$(cat ~/.armpi_key)"
-ros2 run armpi_voice arm_agent --ros-args -p base_url:=https://api.deepseek.com -p model:=deepseek-chat
+ros2 run armpi_voice arm_agent --ros-args -p base_url:=https://api.deepseek.com -p model:=deepseek-v4-flash
 
 # Terminal 3 — send a command without the chat console:
 ros2 topic pub --once /voice_words std_msgs/msg/String "{data: 'turn left'}"
@@ -113,7 +113,30 @@ Hear audio remotely: write a WAV, copy into `~/ros2_ws/`, download in VS Code, p
 
 ---
 
-## 6. Pick-and-place demo (vision → grasp; needs lab calibration to land)
+## 5b. PLANAR calibration + pick (our own tools — replaces vendor hand-eye)
+
+The vendor hand-eye tool gave position-dependent error twice (2026-07-08), so
+grasping now uses a planar pixel→XY affine map fitted by our own tool. Camera
+is ARM-MOUNTED: detection always happens from one fixed view pose.
+
+```bash
+# Prereq: camera + SDK running in the background (survives terminal reuse):
+export need_compile=False CAMERA_TYPE=aurora
+nohup ros2 launch peripherals depth_camera.launch.py > /tmp/cam.log 2>&1 &
+nohup ros2 launch sdk armpi_ultra.launch.py > /tmp/sdk.log 2>&1 &
+
+# 1. Calibrate (~15 min, interactive; robot places a block at known XY points):
+ros2 run armpi_voice planar_calib                      # red block by default
+#   -> fits affine, prints residuals (mm), saves ~/planar_map.yaml
+
+# 2. Pick:
+ros2 run armpi_voice planar_pick                       # detect red, grasp, hold
+ros2 run armpi_voice planar_pick --ros-args -p color:=blue -p place_after:=true
+```
+Tunables (pass as -p name:=value): z_place (grip height, default 0.045),
+z_hover (0.10), pitch (85.0), grid_x/grid_y (the calibration grid), grip_close (550).
+
+## 6. Pick-and-place demo (vendor's; superseded by 5b for grasping)
 
 ```bash
 # Terminal A — camera:

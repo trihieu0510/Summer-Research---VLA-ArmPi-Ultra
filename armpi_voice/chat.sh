@@ -59,8 +59,9 @@ ros2 launch sdk armpi_ultra.launch.py >/tmp/armpi_sdk.log 2>&1 &
 SDK_PID=$!
 
 echo "Starting LLM agent (DeepSeek)..."
+# NOTE: "deepseek-chat" is retired 2026-07-24; deepseek-v4-flash is its successor.
 ros2 run armpi_voice arm_agent --ros-args \
-    -p base_url:=https://api.deepseek.com -p model:=deepseek-chat \
+    -p base_url:=https://api.deepseek.com -p model:=deepseek-v4-flash \
     >/tmp/armpi_agent.log 2>&1 &
 AGENT_PID=$!
 
