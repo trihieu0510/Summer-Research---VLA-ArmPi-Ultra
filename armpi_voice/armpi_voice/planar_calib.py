@@ -211,7 +211,7 @@ def run(node) -> None:
             if choice in ('accepted', 's', 'skip'):
                 break
 
-    if len(pixels) < 3:
+    if len(pixels) < 4:
         print(f'\nOnly {len(pixels)} usable points — not enough to fit. Nothing saved.')
         return
 
@@ -222,16 +222,24 @@ def run(node) -> None:
               f'{spread_y * 1000:.0f} mm — the fit will extrapolate badly outside '
               'that area. Strongly consider re-running with more spread-out points.')
 
-    affine, residuals = pc.fit_affine(pixels, xys)
-    print('\n=== Fit results ===')
-    for (x, y), r in zip(xys, residuals):
+    H, kept, residuals = pc.fit_planar(pixels, xys)
+    print('\n=== Fit results (homography + outlier rejection) ===')
+    for idx, r in zip(kept, residuals):
+        x, y = xys[idx]
         print(f'  ({x:+.3f}, {y:+.3f})  residual {r * 1000:.1f} mm')
-    print(f'  worst {residuals.max() * 1000:.1f} mm, mean {residuals.mean() * 1000:.1f} mm')
+    dropped = [i for i in range(len(xys)) if i not in kept]
+    for i in dropped:
+        print(f'  ({xys[i][0]:+.3f}, {xys[i][1]:+.3f})  DROPPED as outlier '
+              '(block likely rolled on release)')
+    print(f'  kept {len(kept)}/{len(xys)}: worst {residuals.max() * 1000:.1f} mm, '
+          f'mean {residuals.mean() * 1000:.1f} mm')
+    if residuals.max() > 0.012:
+        print('\nWARNING: worst residual above ~12mm — grasps may miss; consider re-running.')
 
     heights = {'z_hover': node.z_hover, 'z_place': node.z_place,
                'pitch': node.pitch, 'pitch_range': node.pitch_range,
                'grip_close': node.grip_close, 'gripper_open': node.gripper_open}
-    pc.save_map(node.map_path, affine, node.view_pose, heights, audit)
+    pc.save_map(node.map_path, H, node.view_pose, heights, audit)
     print(f'\nSaved planar map -> {node.map_path}')
     print('Test it with:  ros2 run armpi_voice planar_pick')
 

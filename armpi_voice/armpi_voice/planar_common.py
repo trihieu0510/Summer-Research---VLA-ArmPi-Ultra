@@ -105,33 +105,72 @@ def detect_block(bgr, color):
 
 
 # --- The planar map ----------------------------------------------------------------
+# The camera views the mat at an angle, so pixel->world has real PERSPECTIVE:
+# on 2026-07-08 data the same 12cm of mat spanned 328px near vs 153px far. An
+# affine (constant-scale) fit left 14mm mean error; a homography fits ~3mm.
 
-def fit_affine(pixels, xys):
-    """Least-squares affine fit pixel->XY. Returns (2x3 matrix, per-point residuals [m])."""
+def _fit_homography(pixels, xys):
+    """Normalized DLT homography pixel->XY. Returns 3x3 H."""
     pixels = np.asarray(pixels, dtype=float)
     xys = np.asarray(xys, dtype=float)
-    if len(pixels) < 3:
-        raise ValueError('Need at least 3 point pairs for an affine fit.')
-    design = np.hstack([pixels, np.ones((len(pixels), 1))])       # [u v 1]
-    coeffs, *_ = np.linalg.lstsq(design, xys, rcond=None)          # (3x2)
-    affine = coeffs.T                                              # (2x3)
-    predicted = design @ coeffs
-    residuals = np.linalg.norm(predicted - xys, axis=1)
-    return affine, residuals
+    n = len(pixels)
+
+    def norm_transform(p):
+        mean = p.mean(0)
+        scale = np.sqrt(2) / np.mean(np.linalg.norm(p - mean, axis=1))
+        return np.array([[scale, 0, -scale * mean[0]],
+                         [0, scale, -scale * mean[1]],
+                         [0, 0, 1]])
+
+    Tp, Tx = norm_transform(pixels), norm_transform(xys)
+    ph = (Tp @ np.hstack([pixels, np.ones((n, 1))]).T).T
+    xh = (Tx @ np.hstack([xys, np.ones((n, 1))]).T).T
+    rows = []
+    for (u, v, _), (x, y, _) in zip(ph, xh):
+        rows.append([0, 0, 0, -u, -v, -1, y * u, y * v, y])
+        rows.append([u, v, 1, 0, 0, 0, -x * u, -x * v, -x])
+    _, _, vt = np.linalg.svd(np.array(rows))
+    return np.linalg.inv(Tx) @ vt[-1].reshape(3, 3) @ Tp
 
 
-def apply_affine(affine, u, v):
-    x = affine[0][0] * u + affine[0][1] * v + affine[0][2]
-    y = affine[1][0] * u + affine[1][1] * v + affine[1][2]
-    return float(x), float(y)
+def _residuals(H, pixels, xys):
+    pixels = np.asarray(pixels, dtype=float)
+    xys = np.asarray(xys, dtype=float)
+    q = (np.asarray(H) @ np.hstack([pixels, np.ones((len(pixels), 1))]).T).T
+    return np.linalg.norm(q[:, :2] / q[:, 2:3] - xys, axis=1)
 
 
-def save_map(path, affine, view_pose, heights, points):
+def fit_planar(pixels, xys, drop_thresh=0.010, min_keep=5):
+    """Homography fit with leave-worst-out outlier rejection.
+
+    A capture where the block rolled on release poisons the whole map (seen
+    live: 2 of 9 points at 27/32mm while the rest fit at 3mm). Iteratively
+    drop the worst point while it exceeds drop_thresh (m) and enough remain.
+    Returns (H, kept_indices, kept_residuals).
+    """
+    kept = list(range(len(pixels)))
+    if len(kept) < 4:
+        raise ValueError('Need at least 4 point pairs for a homography fit.')
+    while True:
+        H = _fit_homography([pixels[i] for i in kept], [xys[i] for i in kept])
+        res = _residuals(H, [pixels[i] for i in kept], [xys[i] for i in kept])
+        if res.max() <= drop_thresh or len(kept) <= min_keep:
+            return H, kept, res
+        kept.pop(int(res.argmax()))
+
+
+def apply_planar(H, u, v):
+    H = np.asarray(H)
+    q = H @ np.array([u, v, 1.0])
+    return float(q[0] / q[2]), float(q[1] / q[2])
+
+
+def save_map(path, H, view_pose, heights, points):
     data = {
-        'affine': np.asarray(affine).tolist(),
+        'homography': np.asarray(H).tolist(),
         'view_pose': {int(k): int(v) for k, v in view_pose.items()},
         'heights': heights,          # {'z_hover': ..., 'z_place': ..., 'pitch': ...}
-        'points': points,            # the raw correspondences, for auditing
+        'points': points,            # the raw correspondences, for auditing/refits
     }
     with open(path, 'w') as f:
         yaml.safe_dump(data, f)
@@ -141,6 +180,21 @@ def load_map(path):
     with open(path) as f:
         data = yaml.safe_load(f)
     data['view_pose'] = {int(k): int(v) for k, v in data['view_pose'].items()}
+    # Refit from the stored raw points when possible: older maps (affine-era)
+    # upgrade to a homography automatically, and outliers get re-rejected.
+    points = data.get('points') or []
+    if len(points) >= 4:
+        pixels = [p['pixel'] for p in points]
+        xys = [p['xy'] for p in points]
+        H, kept, res = fit_planar(pixels, xys)
+        data['H'] = H
+        data['fit_info'] = (f'{len(kept)}/{len(points)} points kept, '
+                            f'worst {res.max() * 1000:.1f}mm')
+    elif 'homography' in data:
+        data['H'] = np.asarray(data['homography'])
+        data['fit_info'] = 'stored homography (no raw points)'
+    else:
+        raise ValueError(f'{path} has neither enough points nor a homography.')
     return data
 
 

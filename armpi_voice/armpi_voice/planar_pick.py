@@ -59,7 +59,7 @@ class PlanarPick(Node):
 def pick(node) -> bool:
     io = node.io
     m = pc.load_map(node.map_path)
-    affine = m['affine']
+    node.get_logger().info(f'Planar map fit: {m["fit_info"]}')
     h = m['heights']
     z_hover, z_place = h['z_hover'], h['z_place']
     pitch, pitch_range = h['pitch'], h['pitch_range']
@@ -72,7 +72,7 @@ def pick(node) -> bool:
         node.say(f"I can't see a {node.color} block.")
         return False
 
-    x, y = pc.apply_affine(affine, det[0], det[1])
+    x, y = pc.apply_planar(m['H'], det[0], det[1])
     node.get_logger().info(
         f'{node.color} block at pixel ({det[0]:.1f}, {det[1]:.1f}) -> robot ({x:.3f}, {y:.3f})')
 
