@@ -40,13 +40,16 @@ class PlanarCalib(Node):
         # Grid of robot-frame targets (meters). 3x3 = 9 correspondences.
         self.declare_parameter('grid_x', [0.13, 0.17, 0.21])
         self.declare_parameter('grid_y', [-0.06, 0.0, 0.06])
-        # Heights + approach. z_place is where the gripper opens/closes around
-        # the block; tune on point 1 (the console lets you nudge it).
+        # Heights + approach. z_place is only a STARTING GUESS — the tune phase
+        # at the beginning of every run steps it to the real height live.
+        # pitch=80 and grip_close=540 come from Hiwonder's own working grasp
+        # call: pick_and_place.pick(position, 80, yaw, 540, ...).
         self.declare_parameter('z_hover', 0.10)
-        self.declare_parameter('z_place', 0.045)
-        self.declare_parameter('pitch', 85.0)
+        self.declare_parameter('z_place', 0.03)
+        self.declare_parameter('pitch', 80.0)
         self.declare_parameter('pitch_range', [55.0, 120.0])
-        self.declare_parameter('grip_close', 550)
+        self.declare_parameter('grip_close', 540)
+        self.declare_parameter('gripper_open', 200)
         # View pose (servo pulses 1..6) — MUST match planar_pick's.
         self.declare_parameter('view_pose', [500, 500, 208, 995, 753, 500])
 
@@ -60,6 +63,7 @@ class PlanarCalib(Node):
         self.pitch = float(p('pitch'))
         self.pitch_range = list(p('pitch_range'))
         self.grip_close = int(p('grip_close'))
+        self.gripper_open = int(p('gripper_open'))
         self.view_pose = {i + 1: int(v) for i, v in enumerate(p('view_pose'))}
 
         self.io = pc.ArmIO(self, p('camera_topic'))
@@ -79,7 +83,7 @@ def place_block(node, x, y):
           and io.move_xyz(x, y, node.z_place, node.pitch, node.pitch_range, duration=1.0))
     if not ok:
         return False
-    io.gripper(pc.GRIPPER_OPEN)                     # release
+    io.gripper(node.gripper_open)                   # release
     io.move_xyz(x, y, node.z_hover, node.pitch, node.pitch_range, duration=1.0)
     return True
 
@@ -93,6 +97,52 @@ def regrasp_block(node, x, y):
     io.gripper(node.grip_close)
     io.move_xyz(x, y, node.z_hover, node.pitch, node.pitch_range, duration=1.0)
     return True
+
+
+def tune_grip(node, x, y):
+    """Interactive height + jaw tune at one spot. Ends with the block GRIPPED.
+
+    Returns the tuned z_place, or None on abort. This exists because the mat's
+    height in the IK frame is not knowable remotely — the first run proved that
+    guessed constants drop the block mid-air and close the jaws on its top.
+    """
+    io = node.io
+    z = max(node.z_place, 0.05)   # start clearly above, only ever step down
+    io.gripper(node.gripper_open)
+    if not io.move_xyz(x, y, node.z_hover, node.pitch, node.pitch_range):
+        print('Cannot reach the tune point — adjust grid parameters.')
+        return None
+    if ask(f'\nTUNE PHASE: put the block on the mat DIRECTLY UNDER the jaws '
+           f'(x={x:.3f}, y={y:.3f}), then press Enter (or abort): ') == 'abort':
+        return None
+
+    while True:
+        if not io.move_xyz(x, y, z, node.pitch, node.pitch_range, duration=0.8):
+            print(f'z={z:.3f} unreachable, stepping back up.')
+            z += 0.005
+            continue
+        reply = ask(f'z={z * 1000:.0f}mm | d = down 5mm | u = up 5mm | '
+                    f'<number> = jaw pulse (lower = wider, now {node.gripper_open}) | '
+                    'Enter = jaws straddle the block, GRAB IT | abort: ')
+        if reply == 'abort':
+            return None
+        if reply == 'd':
+            z = max(0.0, z - 0.005)
+        elif reply == 'u':
+            z += 0.005
+        elif reply.isdigit():
+            node.gripper_open = int(reply)
+            io.gripper(node.gripper_open)
+        elif reply == '':
+            io.gripper(node.grip_close)
+            io.move_xyz(x, y, node.z_hover, node.pitch, node.pitch_range, duration=1.0)
+            if ask('Lifted — is the block IN the jaws? Enter = yes, n = retry: ') in ('', 'y', 'yes'):
+                print(f'Tuned: z_place={z:.3f}, jaws open={node.gripper_open}, '
+                      f'close={node.grip_close}')
+                return z
+            io.gripper(node.gripper_open)
+            if ask('Re-place the block under the jaws, press Enter (or abort): ') == 'abort':
+                return None
 
 
 def run(node) -> None:
@@ -111,13 +161,11 @@ def run(node) -> None:
     if len(reachable) < len(grid):
         print(f'Note: {len(grid) - len(reachable)} unreachable point(s) skipped.')
 
-    # -- hand the block to the robot --
-    io.go_view_pose(node.view_pose)
-    io.gripper(pc.GRIPPER_OPEN)
-    if ask('\nPut the block between the OPEN gripper jaws, then press Enter '
-           '(or type abort): ') == 'abort':
+    # -- tune heights/jaws at the centre point; ends with the block gripped --
+    z = tune_grip(node, *reachable[len(reachable) // 2])
+    if z is None:
         return
-    io.gripper(node.grip_close)
+    node.z_place = z
 
     pixels, xys, audit = [], [], []
     for i, (x, y) in enumerate(reachable, 1):
@@ -151,7 +199,7 @@ def run(node) -> None:
                 if reply == 'abort':
                     return
                 if reply == 'o':
-                    io.gripper(pc.GRIPPER_OPEN)
+                    io.gripper(node.gripper_open)
                     continue
                 if reply == 'c':
                     io.gripper(node.grip_close)
@@ -172,7 +220,7 @@ def run(node) -> None:
 
     heights = {'z_hover': node.z_hover, 'z_place': node.z_place,
                'pitch': node.pitch, 'pitch_range': node.pitch_range,
-               'grip_close': node.grip_close}
+               'grip_close': node.grip_close, 'gripper_open': node.gripper_open}
     pc.save_map(node.map_path, affine, node.view_pose, heights, audit)
     print(f'\nSaved planar map -> {node.map_path}')
     print('Test it with:  ros2 run armpi_voice planar_pick')

@@ -63,7 +63,8 @@ def pick(node) -> bool:
     h = m['heights']
     z_hover, z_place = h['z_hover'], h['z_place']
     pitch, pitch_range = h['pitch'], h['pitch_range']
-    grip_close = h.get('grip_close', 550)
+    grip_close = h.get('grip_close', 540)
+    grip_open = h.get('gripper_open', pc.GRIPPER_OPEN)
 
     io.go_view_pose(m['view_pose'])
     det = io.detect_median(node.color)
@@ -75,7 +76,7 @@ def pick(node) -> bool:
     node.get_logger().info(
         f'{node.color} block at pixel ({det[0]:.1f}, {det[1]:.1f}) -> robot ({x:.3f}, {y:.3f})')
 
-    io.gripper(pc.GRIPPER_OPEN)
+    io.gripper(grip_open)
     if not (io.move_xyz(x, y, z_hover, pitch, pitch_range)
             and io.move_xyz(x, y, z_place, pitch, pitch_range, duration=1.0)):
         node.say("I can't reach that spot.")
@@ -96,7 +97,7 @@ def pick(node) -> bool:
         if (io.move_xyz(node.place_x, node.place_y, z_hover, pitch, pitch_range)
                 and io.move_xyz(node.place_x, node.place_y, z_place, pitch, pitch_range,
                                 duration=1.0)):
-            io.gripper(pc.GRIPPER_OPEN)
+            io.gripper(grip_open)
             io.move_xyz(node.place_x, node.place_y, z_hover, pitch, pitch_range, duration=1.0)
             node.say(f'Picked and placed the {node.color} block.')
         else:
