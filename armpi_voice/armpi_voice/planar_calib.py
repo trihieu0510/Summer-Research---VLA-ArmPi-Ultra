@@ -143,9 +143,20 @@ def run(node) -> None:
             # Re-grasp so the arm carries the block to the next point.
             if not regrasp_block(node, x, y):
                 print('Re-grasp motion failed.')
-            if ask('Is the block back IN the gripper? Enter = yes, '
-                   'n = fix it by hand then press Enter: ') == 'abort':
-                return
+            # If the jaws missed, let the user open/close them to reseat the
+            # block by hand — a closed empty gripper was a dead end before.
+            while True:
+                reply = ask('Block back IN the gripper? Enter = yes | o = open jaws | '
+                            'c = close jaws | abort: ')
+                if reply == 'abort':
+                    return
+                if reply == 'o':
+                    io.gripper(pc.GRIPPER_OPEN)
+                    continue
+                if reply == 'c':
+                    io.gripper(node.grip_close)
+                    continue
+                break
             if choice in ('accepted', 's', 'skip'):
                 break
 
