@@ -201,9 +201,15 @@ def apply_planar(H, u, v):
 
 
 def far_z(x, z):
-    """Height compensation at far reach — mirrors Hiwonder's own demo, which
-    does `position[2] += 0.01` when x > 0.22 (IK z error grows with reach)."""
-    return z + 0.01 if x > 0.22 else z
+    """Height compensation at reach — the arm droops as it extends (dug into
+    the mat at far grid points, bending a gripper screw on 2026-07-10).
+    Graded, not a single step: +5mm beyond x=0.19, +10mm beyond x=0.22
+    (Hiwonder's own demo uses +10mm past 0.22)."""
+    if x > 0.22:
+        return z + 0.010
+    if x > 0.19:
+        return z + 0.005
+    return z
 
 
 def save_map(path, H, view_pose, heights, points):
