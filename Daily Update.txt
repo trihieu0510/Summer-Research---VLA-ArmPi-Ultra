@@ -156,8 +156,21 @@ Status: Wk 3 (agent: gestures + parametric + sequential moves + conversation) an
   DeepSeek docs). ARMPI_NO_TTS=1 starts chat.sh silent (people in the room). COMMANDS.md sec 5b documents the
   planar workflow.
 
-Next session: re-run the 4-row calibration (grid_x 0.13-0.22) with the droop fix, mark the reachable zone on the
-mat with tape, do a 10-pick success tally across the zone (target >=7/10 = M1 done), then wire pick/place into
-arm_agent so "grab the red block" works from the chat box. Remote work available meanwhile: faster-whisper STT.
-Status: planar calibration pipeline built and debugged end-to-end; picks landing inside the calibrated zone;
-M1 one clean session away. See Documents/COMMANDS.md sec 5b.
+(10/07 evening — THE MILESTONE)
+- Fixed the gripper screw (power off -> arm limp -> tighten), added graded droop compensation in code.
+- WIRED THE PICK SKILL INTO THE CHAT AGENT: new step type {"action":"pick","color":...} in arm_agent —
+  same code path as planar_pick (extracted to planar_common.run_pick so CLI and chat can't drift).
+  chat.sh now auto-starts the depth camera (pick needs eyes). Parser unit-tested on the laptop.
+- Debug detour: camera wouldn't come up (aurora "open device failed 0x21003" = something else held the USB
+  device) -> pkill aurora930 + relaunch fixed it. Also learned: /tmp/pick_debug.jpg + "I can't see a block"
+  almost always means the camera is down, not the vision.
+- Recalibrated with the 4-row grid (0.13-0.22) after the screw repair shifted geometry.
+- END STATE: typed "grab the red block" into the chat box -> robot looked, found it, grasped it, lifted it,
+  and said so. FULL LOOP: language -> LLM -> vision -> planar map -> IK -> grasp -> verified -> spoken reply.
+  This was the whole point of the project's manipulation track. M1/M2 effectively DONE.
+
+Next session: 10-pick success tally across the zone (formal M1 numbers), tape the reachable zone on the mat,
+then start faster-whisper STT (remote-friendly) to make it "SAY grab the red block" instead of typing.
+Later/optional: YOLO "what do you see?" skill (ultralytics already on the Pi) — queued behind STT.
+Status: chat agent now converses, gestures, does parametric/sequential moves, AND picks colored blocks on
+command. Remaining for the headline demo: voice input. See Documents/COMMANDS.md sec 1 + 5b.
