@@ -119,3 +119,45 @@ Status: Full manipulation chain validated. Calibration tooling is the only thing
 
 Next session: (in lab) run hand-eye tool.sh + re-test color pick; (remote) add SPEECH INPUT (faster-whisper STT -> publish to /voice_words) to close the voice loop, and/or refactor object_sorting into a callable pick(color) skill (Wk 2) so the agent can manipulate, not just gesture.
 Status: Wk 3 (agent: gestures + parametric + sequential moves + conversation) and Wk 4 voice OUTPUT both working over the network. Remaining: voice INPUT, and manipulation (gated on lab calibration). See Documents/session_handoff_2026-06-25.md and Documents/COMMANDS.md.
+
+06/07 - 10/07 (lab week — the calibration saga, and FIRST REAL PICKS)
+- Back in the lab (still driving via UltraViewer -> PC -> LAN -> Pi). Goal: finally fix calibration (M1).
+- Ran Hiwonder's hand-eye calibration GUI for the first time. Getting the window to even open took a whole session:
+  the tool silently blocks BEFORE showing its window while waiting for /kinematics services, so with no SDK
+  running it looks dead. Every failed attempt left a zombie instance (found 12 of them via xwininfo). Rule
+  learned: camera + SDK must run FIRST (as nohup background jobs so terminal reuse doesn't kill them), THEN
+  launch the tool. Also: its log line "初始化 hand2cam_tf_matrix 为默认值" proved the hand-eye matrix had been
+  FACTORY DEFAULT all along — that's why June's yaml offset tuning never converged.
+- Did the hand-eye capture (8 poses, QR board, sliders + 增加/更新 buttons, then 手眼标定). Real matrix saved to
+  ~/ros2_ws/src/peripherals/config/camera_info.yaml. But grasps were STILL position-dependent after two solves.
+- Asked the big question: ditch the Hiwonder stack for LeRobot? Researched it properly. Answer: NO — no driver
+  for Hiwonder's servo bus, imitation learning needs teleop demos + a GPU we don't have, and a learned policy just
+  absorbs calibration error into its training data. Keep the stack, replace only the calibration layer with our own code.
+- Built the PLANAR pipeline in armpi_voice (the week's big win): planar_calib + planar_pick.
+  * planar_calib: the arm generates its own ground truth — carries a block to a grid of known robot XY points,
+    releases, retreats to a fixed view pose, detects the block's pixel, re-grasps, moves on. Fits pixel->XY,
+    saves ~/planar_map.yaml. Starts with an interactive TUNE phase (step jaws down 5mm at a time, set jaw pulse)
+    because the mat's height in the IK frame is not knowable remotely — guessed constants dropped blocks mid-air.
+  * planar_pick: view pose -> HSV detect -> map -> IK hover/descend/close/lift -> looks again to verify the grasp.
+- Debug lessons (each found the hard way, all fixed in code):
+  * Affine fit is WRONG for this camera — perspective is huge (12cm of mat = 328px near vs 153px far). Switched
+    to a homography with bounded outlier rejection (max 1/3 dropped). Fits real data at ~4-10mm.
+  * Detection must be restricted to the mat area (ROI from the calibration points) — largest-red-blob grabbed a
+    background object once (v=122 when the mat starts at v~180). Every pick now saves /tmp/pick_debug.jpg.
+  * Gripper facts (verified live): pulse 100 = wide open, higher = narrower, close on block = 540, pitch = 80
+    (mined from Hiwonder's own pick_and_place call). Jaws must snap WIDE before every descent or the block wedges.
+  * The arm DROOPS with reach: graded z compensation (+5mm past x=0.19, +10mm past 0.22). Learned this the
+    painful way — it dug into the mat and loosened a gripper screw (fix: power off, arm goes limp, tighten).
+  * Grasp verify: "block moved" is NOT success (a miss can knock it away); check same-spot first, then the mat.
+- RESULT: first genuinely verified picks! Multiple "Got the red block!" runs confirmed real. Reach envelope
+  mapped honestly: the arm can only grasp x≈0.13-0.22 — the far half of the mat is physically out of reach
+  (IK refuses 0.25), so the working zone is now a known, markable rectangle.
+- Side fixes: deepseek-chat is retired 24/07 -> renamed to deepseek-v4-flash everywhere (verified against
+  DeepSeek docs). ARMPI_NO_TTS=1 starts chat.sh silent (people in the room). COMMANDS.md sec 5b documents the
+  planar workflow.
+
+Next session: re-run the 4-row calibration (grid_x 0.13-0.22) with the droop fix, mark the reachable zone on the
+mat with tape, do a 10-pick success tally across the zone (target >=7/10 = M1 done), then wire pick/place into
+arm_agent so "grab the red block" works from the chat box. Remote work available meanwhile: faster-whisper STT.
+Status: planar calibration pipeline built and debugged end-to-end; picks landing inside the calibrated zone;
+M1 one clean session away. See Documents/COMMANDS.md sec 5b.
