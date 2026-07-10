@@ -92,6 +92,7 @@ def place_block(node, x, y):
 def regrasp_block(node, x, y):
     io = node.io
     z = pc.far_z(x, node.z_place)
+    io.gripper(node.gripper_open)   # jaws WIDE before descending — never push down onto the block
     ok = (io.move_xyz(x, y, node.z_hover, node.pitch, node.pitch_range)
           and io.move_xyz(x, y, z, node.pitch, node.pitch_range, duration=1.0))
     if not ok:
