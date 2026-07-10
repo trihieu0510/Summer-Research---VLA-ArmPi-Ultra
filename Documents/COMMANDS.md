@@ -133,8 +133,9 @@ ros2 run armpi_voice planar_calib                      # red block by default
 ros2 run armpi_voice planar_pick                       # detect red, grasp, hold
 ros2 run armpi_voice planar_pick --ros-args -p color:=blue -p place_after:=true
 ```
-Tunables (pass as -p name:=value): z_place (grip height, default 0.045),
-z_hover (0.10), pitch (85.0), grid_x/grid_y (the calibration grid), grip_close (550).
+Tunables (pass as -p name:=value): z_place (grip height; tuned live in the tune
+phase), z_hover (0.10), pitch (80.0), grid_x/grid_y (the calibration grid),
+grip_close (540), gripper_open (100 = wide open; higher = narrower).
 
 ## 6. Pick-and-place demo (vendor's; superseded by 5b for grasping)
 

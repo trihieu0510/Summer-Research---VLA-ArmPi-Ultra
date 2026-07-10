@@ -46,7 +46,7 @@ MAP_PATH_DEFAULT = os.path.expanduser('~/planar_map.yaml')
 VIEW_POSE_DEFAULT = {1: 500, 2: 500, 3: 208, 4: 995, 5: 753, 6: 500}
 
 GRIPPER_ID = 1
-GRIPPER_OPEN = 200
+GRIPPER_OPEN = 100   # verified live 2026-07-10: 100 = wide open, higher = narrower
 
 # HSV ranges (OpenCV H in 0..180). Red wraps around 0 so it needs two bands.
 COLOR_RANGES = {

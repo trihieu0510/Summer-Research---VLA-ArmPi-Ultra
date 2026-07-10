@@ -49,7 +49,7 @@ class PlanarCalib(Node):
         self.declare_parameter('pitch', 80.0)
         self.declare_parameter('pitch_range', [55.0, 120.0])
         self.declare_parameter('grip_close', 540)
-        self.declare_parameter('gripper_open', 200)
+        self.declare_parameter('gripper_open', 100)   # 100 = wide open (verified live)
         # View pose (servo pulses 1..6) — MUST match planar_pick's.
         self.declare_parameter('view_pose', [500, 500, 208, 995, 753, 500])
 

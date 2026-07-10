@@ -61,7 +61,7 @@ ACTIONS = {
     "home":  [(1.5, HOME_POSE)],
     "left":  [(1.0, [(6, 800)])],
     "right": [(1.0, [(6, 200)])],
-    "open":  [(0.5, [(1, 200)])],
+    "open":  [(0.5, [(1, 100)])],   # 100 = wide open (verified live 2026-07-10)
     "close": [(0.5, [(1, 500)])],
     "nod":   [(0.5, [(4, 300)]), (0.5, [(4, 500)])],   # tilt down, then return
 }
@@ -139,7 +139,7 @@ class ArmAgent(Node):
             "  - servo 6 = base rotation. Operator's view: RIGHT is LOWER (toward 200), "
             "LEFT is HIGHER (toward 800). So a relative 'right' = NEGATIVE delta, "
             "'left' = POSITIVE delta.\n"
-            "  - servo 1 = gripper: open ~200, closed ~500.\n"
+            "  - servo 1 = gripper: wide open ~100, closed ~540 (higher = tighter).\n"
             "  - servos 2-5 = arm joints (shoulder/elbow/wrist); 'up/raise' = POSITIVE "
             "delta, 'down/lower' = NEGATIVE delta (~120 for 'a bit'). Exact mapping unverified.\n\n"
             "EACH STEP is one of:\n"
