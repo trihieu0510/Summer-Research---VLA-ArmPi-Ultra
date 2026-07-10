@@ -109,12 +109,16 @@ def pick(node) -> bool:
     io.go_view_pose(m['view_pose'])
     still_there = io.detect_median(node.color, samples=3)
     if still_there is not None:
+        du, dv = still_there[0] - det[0], still_there[1] - det[1]
+        # Same spot as before => clean miss. Check this FIRST — a near-row
+        # block also sits in the gripper blindspot and must not be excused
+        # by it (false "Got it!" seen live on 2026-07-10).
+        if (du * du + dv * dv) ** 0.5 < 40:
+            node.say(f'I missed the {node.color} block.')
+            return False
         frame_h = io.frame_height or 400
-        in_gripper_strip = still_there[1] > frame_h - 130
-        if not in_gripper_strip:
-            du, dv = still_there[0] - det[0], still_there[1] - det[1]
-            knocked = (du * du + dv * dv) ** 0.5 >= 40
-            node.say(f"I {'knocked away' if knocked else 'missed'} the {node.color} block.")
+        if still_there[1] <= frame_h - 130:   # on the mat, away from original
+            node.say(f'I knocked away the {node.color} block.')
             return False
 
     if node.place_after:

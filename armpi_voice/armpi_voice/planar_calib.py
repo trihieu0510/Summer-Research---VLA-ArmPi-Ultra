@@ -157,9 +157,12 @@ def run(node) -> None:
     print(f'\n=== Planar calibration: {len(grid)} points, color "{node.color}" ===')
     print('Arm SDK + camera must already be running (COMMANDS.md sec 2/4).')
 
-    # -- feasibility pass: drop unreachable points before touching anything --
+    # -- feasibility pass: drop unreachable points before touching anything.
+    # Use the SAME height the placement will use (far_z compensation), else
+    # far points get dropped here that the real motion could reach.
     reachable = [pt for pt in grid
-                 if io.ik_solve(pt[0], pt[1], node.z_place, node.pitch, node.pitch_range)]
+                 if io.ik_solve(pt[0], pt[1], pc.far_z(pt[0], node.z_place),
+                                node.pitch, node.pitch_range)]
     if len(reachable) < 4:
         print(f'Only {len(reachable)}/{len(grid)} grid points are IK-reachable — '
               'adjust grid_x/grid_y/z_place parameters first.')
