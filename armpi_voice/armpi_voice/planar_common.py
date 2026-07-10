@@ -165,6 +165,12 @@ def apply_planar(H, u, v):
     return float(q[0] / q[2]), float(q[1] / q[2])
 
 
+def far_z(x, z):
+    """Height compensation at far reach — mirrors Hiwonder's own demo, which
+    does `position[2] += 0.01` when x > 0.22 (IK z error grows with reach)."""
+    return z + 0.01 if x > 0.22 else z
+
+
 def save_map(path, H, view_pose, heights, points):
     data = {
         'homography': np.asarray(H).tolist(),
@@ -213,6 +219,7 @@ class ArmIO:
         self.bridge = CvBridge()
         self._frame = None
         self._frame_stamp = 0.0
+        self.frame_height = None
 
         self.servo_pub = node.create_publisher(ServosPosition, '/servo_controller', 1)
         SetRobotPose = import_set_robot_pose()
@@ -225,6 +232,7 @@ class ArmIO:
         try:
             self._frame = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
             self._frame_stamp = time.monotonic()
+            self.frame_height = self._frame.shape[0]
         except Exception as exc:                      # noqa: BLE001
             self.node.get_logger().warn(f'Image conversion failed: {exc}')
 

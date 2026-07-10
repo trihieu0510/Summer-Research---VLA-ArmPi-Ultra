@@ -79,8 +79,9 @@ def ask(prompt):
 
 def place_block(node, x, y):
     io = node.io
+    z = pc.far_z(x, node.z_place)
     ok = (io.move_xyz(x, y, node.z_hover, node.pitch, node.pitch_range)
-          and io.move_xyz(x, y, node.z_place, node.pitch, node.pitch_range, duration=1.0))
+          and io.move_xyz(x, y, z, node.pitch, node.pitch_range, duration=1.0))
     if not ok:
         return False
     io.gripper(node.gripper_open)                   # release
@@ -90,8 +91,9 @@ def place_block(node, x, y):
 
 def regrasp_block(node, x, y):
     io = node.io
+    z = pc.far_z(x, node.z_place)
     ok = (io.move_xyz(x, y, node.z_hover, node.pitch, node.pitch_range)
-          and io.move_xyz(x, y, node.z_place, node.pitch, node.pitch_range, duration=1.0))
+          and io.move_xyz(x, y, z, node.pitch, node.pitch_range, duration=1.0))
     if not ok:
         return False
     io.gripper(node.grip_close)
@@ -254,9 +256,11 @@ def main(args=None) -> None:
     except KeyboardInterrupt:
         print('\nInterrupted.')
     finally:
-        node.destroy_node()
+        # Shutdown stops the spin thread; only then is destroying safe.
         if rclpy.ok():
             rclpy.shutdown()
+        spinner.join(timeout=2.0)
+        node.destroy_node()
 
 
 if __name__ == '__main__':

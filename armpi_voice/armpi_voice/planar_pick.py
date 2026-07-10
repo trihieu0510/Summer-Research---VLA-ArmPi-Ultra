@@ -90,9 +90,10 @@ def pick(node) -> bool:
         node.say('My calibration map looks wrong. Please recalibrate me.')
         return False
 
+    z_pl = pc.far_z(x, z_place)
     io.gripper(grip_open)
     if not (io.move_xyz(x, y, z_hover, pitch, pitch_range)
-            and io.move_xyz(x, y, z_place, pitch, pitch_range, duration=1.0)):
+            and io.move_xyz(x, y, z_pl, pitch, pitch_range, duration=1.0)):
         node.get_logger().error(
             f'IK refused ({x:.3f}, {y:.3f}) at z_hover={z_hover} / z_place={z_place}, '
             f'pitch={pitch} range={pitch_range}')
@@ -101,18 +102,25 @@ def pick(node) -> bool:
     io.gripper(grip_close)
     io.move_xyz(x, y, z_hover, pitch, pitch_range, duration=1.0)
 
-    # Verify: look again — if the blob is still at the pick spot, we missed.
+    # Verify: look again. A block visible ON THE MAT means the grasp failed —
+    # either still at the pick spot (clean miss) or elsewhere (knocked away;
+    # a false "success" seen live on 2026-07-10). A held block only ever shows
+    # in the bottom strip of the frame, where the gripper is.
     io.go_view_pose(m['view_pose'])
     still_there = io.detect_median(node.color, samples=3)
     if still_there is not None:
-        du, dv = still_there[0] - det[0], still_there[1] - det[1]
-        if (du * du + dv * dv) ** 0.5 < 40:          # px; same place = failed grasp
-            node.say(f'I missed the {node.color} block.')
+        frame_h = io.frame_height or 400
+        in_gripper_strip = still_there[1] > frame_h - 130
+        if not in_gripper_strip:
+            du, dv = still_there[0] - det[0], still_there[1] - det[1]
+            knocked = (du * du + dv * dv) ** 0.5 >= 40
+            node.say(f"I {'knocked away' if knocked else 'missed'} the {node.color} block.")
             return False
 
     if node.place_after:
         if (io.move_xyz(node.place_x, node.place_y, z_hover, pitch, pitch_range)
-                and io.move_xyz(node.place_x, node.place_y, z_place, pitch, pitch_range,
+                and io.move_xyz(node.place_x, node.place_y,
+                                pc.far_z(node.place_x, z_place), pitch, pitch_range,
                                 duration=1.0)):
             io.gripper(grip_open)
             io.move_xyz(node.place_x, node.place_y, z_hover, pitch, pitch_range, duration=1.0)
@@ -139,9 +147,13 @@ def main(args=None) -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
+        # Stop the executor BEFORE destroying the node — the reverse order
+        # races the spin thread and aborts with "terminate called without
+        # an active exception" on exit.
         if rclpy.ok():
             rclpy.shutdown()
+        spinner.join(timeout=2.0)
+        node.destroy_node()
     print('PICK RESULT:', 'success' if ok else 'FAILED')
 
 
