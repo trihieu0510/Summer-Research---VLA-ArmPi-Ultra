@@ -169,23 +169,29 @@ def _residuals(H, pixels, xys):
     return np.linalg.norm(q[:, :2] / q[:, 2:3] - xys, axis=1)
 
 
-def fit_planar(pixels, xys, drop_thresh=0.010, min_keep=5):
-    """Homography fit with leave-worst-out outlier rejection.
+def fit_planar(pixels, xys, drop_thresh=0.012, min_keep=5):
+    """Homography fit with BOUNDED leave-worst-out outlier rejection.
 
-    A capture where the block rolled on release poisons the whole map (seen
-    live: 2 of 9 points at 27/32mm while the rest fit at 3mm). Iteratively
-    drop the worst point while it exceeds drop_thresh (m) and enough remain.
+    Rejection exists because a rolled block poisons the map — but unbounded
+    rejection overfits: live it dropped 4/9 points (all in the far half),
+    leaving a map that was 2mm in the near rows and fictional far (v=187
+    mapped to an impossible x=0.251). Rule: drop at most 1/3 of the points,
+    then live with the residuals. A map honest to ~10mm everywhere grasps a
+    3cm block; a locally-perfect extrapolating map does not.
     Returns (H, kept_indices, kept_residuals).
     """
     kept = list(range(len(pixels)))
     if len(kept) < 4:
         raise ValueError('Need at least 4 point pairs for a homography fit.')
+    max_drops = min(len(kept) // 3, len(kept) - min_keep)
+    drops = 0
     while True:
         H = _fit_homography([pixels[i] for i in kept], [xys[i] for i in kept])
         res = _residuals(H, [pixels[i] for i in kept], [xys[i] for i in kept])
-        if res.max() <= drop_thresh or len(kept) <= min_keep:
+        if res.max() <= drop_thresh or drops >= max_drops:
             return H, kept, res
         kept.pop(int(res.argmax()))
+        drops += 1
 
 
 def apply_planar(H, u, v):
