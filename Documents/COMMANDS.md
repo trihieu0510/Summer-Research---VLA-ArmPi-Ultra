@@ -36,8 +36,12 @@ turn halfway to the right
 nod and open the gripper
 move motor 3 up a bit
 go home, then turn the base right about 100, then raise motor 4 by 300
+grab the red block
+pick up the blue block and put it away
 what can you do?
 ```
+The pick commands need `~/planar_map.yaml` (run `planar_calib` once — sec 5b) and
+the depth camera; chat.sh now auto-starts the camera if it isn't running.
 
 ---
 

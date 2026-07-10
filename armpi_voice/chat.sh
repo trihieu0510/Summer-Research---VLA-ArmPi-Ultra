@@ -36,6 +36,7 @@ cleanup() {
     [ -n "${TTS_PID:-}" ]   && kill "$TTS_PID" 2>/dev/null
     [ -n "${AGENT_PID:-}" ] && kill "$AGENT_PID" 2>/dev/null
     [ -n "${SDK_PID:-}" ]   && kill -INT "$SDK_PID" 2>/dev/null
+    [ -n "${CAM_PID:-}" ]   && kill -INT "$CAM_PID" 2>/dev/null   # only if WE started it
     wait 2>/dev/null
     echo "bye."
 }
@@ -53,6 +54,16 @@ for pid in $(ps -eo pid=,args= | grep -i '[r]os' | grep -viE "$CAMERA_KEEP" | aw
     kill -9 "$pid" 2>/dev/null
 done
 sleep 1   # let the serial port actually release before we grab it
+
+# The pick skill ("grab the red block") needs the depth camera. Start it only
+# if it isn't already running (the surgical kill above spares an existing one).
+if ! ros2 topic list 2>/dev/null | grep -q '/depth_cam/rgb/image_raw'; then
+    echo "Starting depth camera (pick skill needs eyes)..."
+    export need_compile="${need_compile:-False}"
+    export CAMERA_TYPE="${CAMERA_TYPE:-aurora}"
+    ros2 launch peripherals depth_camera.launch.py >/tmp/armpi_cam.log 2>&1 &
+    CAM_PID=$!
+fi
 
 echo "Starting arm hardware (sdk armpi_ultra.launch.py)..."
 ros2 launch sdk armpi_ultra.launch.py >/tmp/armpi_sdk.log 2>&1 &

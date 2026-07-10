@@ -81,6 +81,9 @@ class ArmAgent(Node):
         self.declare_parameter('speech_topic', '/robot_speech')
         self.declare_parameter('request_timeout', 30.0)
         self.declare_parameter('history_turns', 4)
+        # Pick skill (needs a planar_map.yaml from planar_calib + the camera):
+        self.declare_parameter('camera_topic', '/depth_cam/rgb/image_raw')
+        self.declare_parameter('map_path', '~/planar_map.yaml')
 
         self.model_name = self.get_parameter('model').value
         base_url = self.get_parameter('base_url').value
@@ -124,10 +127,30 @@ class ArmAgent(Node):
         self._worker = threading.Thread(target=self._worker_loop, name='agent-worker', daemon=True)
         self._worker.start()
 
+        # --- Planar pick skill (optional — armed only if a calibration map exists) ---
+        self.map_path = os.path.expanduser(self.get_parameter('map_path').value)
+        self._camera_topic = self.get_parameter('camera_topic').value
+        self._planar = None                      # (planar_common, ArmIO) once armed
+        if os.path.exists(self.map_path):
+            self._init_planar()
+        else:
+            self.get_logger().info(
+                f'No planar map at {self.map_path} — pick skill dormant until calibrated.')
+
         self.voice_sub = self.create_subscription(String, voice_topic, self._on_voice, 10)
         self.get_logger().info(
             f'Ready. Listening on "{voice_topic}"; speaking on "{speech_topic}".'
         )
+
+    def _init_planar(self) -> None:
+        """Arm the pick skill: camera subscription + IK client via planar_common."""
+        try:
+            from . import planar_common as pc
+            self._planar = (pc, pc.ArmIO(self, self._camera_topic))
+            self.get_logger().info(f'Pick skill armed (map: {self.map_path}).')
+        except Exception as exc:                  # missing cv_bridge, bad map, ...
+            self._planar = None
+            self.get_logger().warn(f'Pick skill unavailable: {exc}')
 
     # --- Prompt -------------------------------------------------------------------
     def _build_system_prompt(self) -> str:
@@ -146,6 +169,10 @@ class ArmAgent(Node):
             '  - a named gesture: {"action": "home"}  (home/left/right/open/close/nod)\n'
             '  - a parametric move: {"action": "move", "moves": [ '
             '{"servo": <1-6>, "target": <0-1000>}  OR  {"servo": <1-6>, "delta": <signed>} ]}\n'
+            '  - a pick skill: {"action": "pick", "color": "red"} — visually find the colored '
+            'block on the mat and grab it (colors: red, green, blue). Add "place": true to '
+            'also carry it to the drop spot and release. Use this whenever the user asks to '
+            'grab/pick/get a block.\n'
             "Steps run in order, one after another, so chain them for sequences. Servos listed "
             "together inside ONE move happen simultaneously. Keep any single delta <=300.\n\n"
             "Respond with ONLY a JSON object: "
@@ -158,8 +185,13 @@ class ArmAgent(Node):
             '{"steps":[{"action":"move","moves":[{"servo":6,"target":350}]}],"say":"Turning halfway right."}\n'
             '  "nod and open your gripper" -> '
             '{"steps":[{"action":"nod"},{"action":"open"}],"say":"Nodding, then opening up."}\n'
+            '  "grab the red block" -> '
+            '{"steps":[{"action":"pick","color":"red"}],"say":"Looking for the red block!"}\n'
+            '  "pick up the blue block and put it away" -> '
+            '{"steps":[{"action":"pick","color":"blue","place":true}],"say":"Blue block, coming up."}\n'
             '  "what can you do?" -> '
-            '{"steps":[],"say":"I can turn, nod, grip, move each joint, and chain those into sequences."}'
+            '{"steps":[],"say":"I can turn, nod, move each joint, chain sequences, and pick up '
+            'colored blocks from the mat."}'
         )
 
     # --- ROS callback (runs on the executor thread; must stay fast) ---------------
@@ -241,6 +273,10 @@ class ArmAgent(Node):
                 moves = s.get("moves", []) or []
                 if isinstance(moves, list) and moves:
                     steps.append({"action": "move", "moves": moves})
+            elif action == "pick":
+                steps.append({"action": "pick",
+                              "color": str(s.get("color", "red")).lower(),
+                              "place": bool(s.get("place", False))})
             elif action in ACTIONS:
                 steps.append({"action": action})
         return steps, say
@@ -252,12 +288,37 @@ class ArmAgent(Node):
 
     # --- Motion -------------------------------------------------------------------
     def execute_steps(self, steps) -> None:
-        """Run an ordered list of gesture/move steps, one after another."""
+        """Run an ordered list of gesture/move/pick steps, one after another."""
         for step in steps:
             if step["action"] == "move":
                 self.execute_moves(step["moves"])
+            elif step["action"] == "pick":
+                self.execute_pick(step.get("color", "red"), step.get("place", False))
             else:
                 self.execute_action(step["action"])
+
+    def execute_pick(self, color: str, place: bool) -> None:
+        """Run the planar pick skill (blocking, ~20s). Narrates its own outcome."""
+        if self._planar is None and os.path.exists(self.map_path):
+            self._init_planar()   # map may have appeared since startup
+        if self._planar is None:
+            self._speak("I haven't been calibrated for picking yet — run planar_calib first.")
+            return
+        pc, io = self._planar
+        if color not in pc.COLOR_RANGES:
+            self._speak(f"I only know red, green and blue blocks, not {color}.")
+            return
+        self.get_logger().info(f'Executing pick: color={color}, place={place}')
+        try:
+            pc.run_pick(self, io, color, self.map_path, self._speak, place_after=place)
+        except FileNotFoundError:
+            self._speak("My calibration map is missing — run planar_calib first.")
+        except Exception as exc:                  # noqa: BLE001
+            self.get_logger().error(f'Pick failed: {exc}')
+            self._speak('Something went wrong while I was picking.')
+        # The pick drove servos 2-6 via IK, so our tracked positions are stale;
+        # snap the expectation back to the view pose the skill ends in.
+        self.current.update({sid: pos for sid, pos in HOME_POSE})
 
     def execute_moves(self, moves) -> None:
         """Execute one parametric move (absolute target or relative delta per servo)."""

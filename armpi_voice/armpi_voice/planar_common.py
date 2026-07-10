@@ -371,3 +371,88 @@ class ArmIO:
         pairs = list(zip((6, 5, 4, 3, 2), pulses))
         self.set_servos(duration, pairs)
         return True
+
+
+# --- The pick behavior (shared by planar_pick CLI and arm_agent chat skill) --------
+
+def run_pick(node, io, color, map_path, say, place_after=False,
+             place_x=0.13, place_y=-0.12):
+    """Detect the colored block, map to robot XY, grasp, verify. True on success.
+
+    `say` is a callback(str) — publishes to /robot_speech in both callers, so
+    the robot narrates outcomes identically from the CLI and from the chat.
+    Raises FileNotFoundError if the map is missing (caller explains).
+    """
+    m = load_map(map_path)
+    node.get_logger().info(f'Planar map fit: {m["fit_info"]}')
+    h = m['heights']
+    z_hover, z_place = h['z_hover'], h['z_place']
+    pitch, pitch_range = h['pitch'], h['pitch_range']
+    grip_close = h.get('grip_close', 540)
+    grip_open = h.get('gripper_open', GRIPPER_OPEN)
+    roi = roi_from_points(m.get('points'))
+
+    io.go_view_pose(m['view_pose'])
+    det = io.detect_median(color, roi=roi)
+    io.save_debug('/tmp/pick_debug.jpg', det, roi)   # eyeball what it saw
+    if det is None:
+        say(f"I can't see a {color} block on the mat.")
+        return False
+
+    x, y = apply_planar(m['H'], det[0], det[1])
+    node.get_logger().info(
+        f'{color} block at pixel ({det[0]:.1f}, {det[1]:.1f}) -> robot ({x:.3f}, {y:.3f})')
+
+    # Targets far outside the calibrated area are physically out of reach
+    # (the arm can't grasp beyond ~x=0.22) or a bad detection — refuse.
+    cal_x = [pt['xy'][0] for pt in m.get('points', [])]
+    cal_y = [pt['xy'][1] for pt in m.get('points', [])]
+    if cal_x and not (min(cal_x) - 0.04 <= x <= max(cal_x) + 0.04
+                      and min(cal_y) - 0.04 <= y <= max(cal_y) + 0.04):
+        node.get_logger().error(
+            f'Mapped target ({x:.3f}, {y:.3f}) outside calibrated area '
+            f'x[{min(cal_x):.3f},{max(cal_x):.3f}] y[{min(cal_y):.3f},{max(cal_y):.3f}].')
+        say(f'The {color} block is outside the zone I can reach.')
+        return False
+
+    z_pl = far_z(x, z_place)
+    z_hv = hover_z(x, z_hover)
+    io.gripper(grip_open)
+    if not (io.move_xyz(x, y, z_hv, pitch, pitch_range)
+            and io.move_xyz(x, y, z_pl, pitch, pitch_range, duration=1.0)):
+        node.get_logger().error(
+            f'IK refused ({x:.3f}, {y:.3f}) at z_hover={z_hv} / z_place={z_pl}, '
+            f'pitch={pitch} range={pitch_range}')
+        say("I can't reach that spot.")
+        return False
+    io.gripper(grip_close)
+    io.move_xyz(x, y, z_hv, pitch, pitch_range, duration=1.0)
+
+    # Verify: any blob still ON THE MAT means the grasp failed — same spot is
+    # a clean miss, elsewhere means we knocked it. A held block only ever
+    # appears in the bottom strip of the frame, where the gripper is.
+    io.go_view_pose(m['view_pose'])
+    still_there = io.detect_median(color, samples=3, roi=roi)
+    if still_there is not None:
+        du, dv = still_there[0] - det[0], still_there[1] - det[1]
+        if (du * du + dv * dv) ** 0.5 < 40:
+            say(f'I missed the {color} block.')
+            return False
+        frame_h = io.frame_height or 400
+        if still_there[1] <= frame_h - 130:
+            say(f'I knocked away the {color} block.')
+            return False
+
+    if place_after:
+        place_hv = hover_z(place_x, z_hover)
+        if (io.move_xyz(place_x, place_y, place_hv, pitch, pitch_range)
+                and io.move_xyz(place_x, place_y, far_z(place_x, z_place),
+                                pitch, pitch_range, duration=1.0)):
+            io.gripper(grip_open)
+            io.move_xyz(place_x, place_y, place_hv, pitch, pitch_range, duration=1.0)
+            say(f'Picked and placed the {color} block.')
+        else:
+            say(f'Picked the {color} block, but the drop spot is unreachable.')
+    else:
+        say(f'Got the {color} block!')
+    return True
