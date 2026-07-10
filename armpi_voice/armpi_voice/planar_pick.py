@@ -66,10 +66,15 @@ def pick(node) -> bool:
     grip_close = h.get('grip_close', 540)
     grip_open = h.get('gripper_open', pc.GRIPPER_OPEN)
 
+    # Only search where the mat is — the calibration points define it. Bigger
+    # red things in the background otherwise win the largest-blob contest.
+    roi = pc.roi_from_points(m.get('points'))
+
     io.go_view_pose(m['view_pose'])
-    det = io.detect_median(node.color)
+    det = io.detect_median(node.color, roi=roi)
+    io.save_debug('/tmp/pick_debug.jpg', det, roi)   # eyeball what it saw
     if det is None:
-        node.say(f"I can't see a {node.color} block.")
+        node.say(f"I can't see a {node.color} block on the mat.")
         return False
 
     x, y = pc.apply_planar(m['H'], det[0], det[1])
@@ -91,8 +96,9 @@ def pick(node) -> bool:
         return False
 
     z_pl = pc.far_z(x, z_place)
+    z_hv = pc.hover_z(x, z_hover)
     io.gripper(grip_open)
-    if not (io.move_xyz(x, y, z_hover, pitch, pitch_range)
+    if not (io.move_xyz(x, y, z_hv, pitch, pitch_range)
             and io.move_xyz(x, y, z_pl, pitch, pitch_range, duration=1.0)):
         node.get_logger().error(
             f'IK refused ({x:.3f}, {y:.3f}) at z_hover={z_hover} / z_place={z_place}, '
@@ -100,14 +106,14 @@ def pick(node) -> bool:
         node.say("I can't reach that spot.")
         return False
     io.gripper(grip_close)
-    io.move_xyz(x, y, z_hover, pitch, pitch_range, duration=1.0)
+    io.move_xyz(x, y, z_hv, pitch, pitch_range, duration=1.0)
 
     # Verify: look again. A block visible ON THE MAT means the grasp failed —
     # either still at the pick spot (clean miss) or elsewhere (knocked away;
     # a false "success" seen live on 2026-07-10). A held block only ever shows
     # in the bottom strip of the frame, where the gripper is.
     io.go_view_pose(m['view_pose'])
-    still_there = io.detect_median(node.color, samples=3)
+    still_there = io.detect_median(node.color, samples=3, roi=roi)
     if still_there is not None:
         du, dv = still_there[0] - det[0], still_there[1] - det[1]
         # Same spot as before => clean miss. Check this FIRST — a near-row
@@ -122,12 +128,13 @@ def pick(node) -> bool:
             return False
 
     if node.place_after:
-        if (io.move_xyz(node.place_x, node.place_y, z_hover, pitch, pitch_range)
+        place_hv = pc.hover_z(node.place_x, z_hover)
+        if (io.move_xyz(node.place_x, node.place_y, place_hv, pitch, pitch_range)
                 and io.move_xyz(node.place_x, node.place_y,
                                 pc.far_z(node.place_x, z_place), pitch, pitch_range,
                                 duration=1.0)):
             io.gripper(grip_open)
-            io.move_xyz(node.place_x, node.place_y, z_hover, pitch, pitch_range, duration=1.0)
+            io.move_xyz(node.place_x, node.place_y, place_hv, pitch, pitch_range, duration=1.0)
             node.say(f'Picked and placed the {node.color} block.')
         else:
             node.say(f'Picked the {node.color} block, but the drop spot is unreachable.')

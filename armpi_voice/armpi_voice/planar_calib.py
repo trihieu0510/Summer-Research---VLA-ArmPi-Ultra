@@ -80,25 +80,27 @@ def ask(prompt):
 def place_block(node, x, y):
     io = node.io
     z = pc.far_z(x, node.z_place)
-    ok = (io.move_xyz(x, y, node.z_hover, node.pitch, node.pitch_range)
+    z_hv = pc.hover_z(x, node.z_hover)
+    ok = (io.move_xyz(x, y, z_hv, node.pitch, node.pitch_range)
           and io.move_xyz(x, y, z, node.pitch, node.pitch_range, duration=1.0))
     if not ok:
         return False
     io.gripper(node.gripper_open)                   # release
-    io.move_xyz(x, y, node.z_hover, node.pitch, node.pitch_range, duration=1.0)
+    io.move_xyz(x, y, z_hv, node.pitch, node.pitch_range, duration=1.0)
     return True
 
 
 def regrasp_block(node, x, y):
     io = node.io
     z = pc.far_z(x, node.z_place)
+    z_hv = pc.hover_z(x, node.z_hover)
     io.gripper(node.gripper_open)   # jaws WIDE before descending — never push down onto the block
-    ok = (io.move_xyz(x, y, node.z_hover, node.pitch, node.pitch_range)
+    ok = (io.move_xyz(x, y, z_hv, node.pitch, node.pitch_range)
           and io.move_xyz(x, y, z, node.pitch, node.pitch_range, duration=1.0))
     if not ok:
         return False
     io.gripper(node.grip_close)
-    io.move_xyz(x, y, node.z_hover, node.pitch, node.pitch_range, duration=1.0)
+    io.move_xyz(x, y, z_hv, node.pitch, node.pitch_range, duration=1.0)
     return True
 
 
@@ -160,9 +162,13 @@ def run(node) -> None:
     # -- feasibility pass: drop unreachable points before touching anything.
     # Use the SAME height the placement will use (far_z compensation), else
     # far points get dropped here that the real motion could reach.
+    # A point is usable only if BOTH its (compensated) hover and grasp
+    # heights solve — the live x=0.25 failure was at hover, not grasp.
     reachable = [pt for pt in grid
                  if io.ik_solve(pt[0], pt[1], pc.far_z(pt[0], node.z_place),
-                                node.pitch, node.pitch_range)]
+                                node.pitch, node.pitch_range)
+                 and io.ik_solve(pt[0], pt[1], pc.hover_z(pt[0], node.z_hover),
+                                 node.pitch, node.pitch_range)]
     if len(reachable) < 4:
         print(f'Only {len(reachable)}/{len(grid)} grid points are IK-reachable — '
               'adjust grid_x/grid_y/z_place parameters first.')
@@ -185,6 +191,7 @@ def run(node) -> None:
                 break
             io.go_view_pose(node.view_pose)
             det = io.detect_median(node.color)
+            io.save_debug('/tmp/calib_debug.jpg', det)
             if det is None:
                 choice = ask('Block NOT detected from view pose. retry / skip / abort? ')
             else:

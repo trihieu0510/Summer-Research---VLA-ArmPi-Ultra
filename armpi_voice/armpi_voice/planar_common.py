@@ -82,11 +82,25 @@ def import_set_robot_pose():
 
 # --- Detection ---------------------------------------------------------------------
 
-def detect_block(bgr, color):
-    """Return (u, v, area) of the largest blob of `color`, or None."""
+def detect_block(bgr, color, roi=None):
+    """Return (u, v, area) of the largest blob of `color`, or None.
+
+    roi=(u0, v0, u1, v1) restricts the search to that pixel window — used to
+    keep detection ON THE MAT. Without it, any bigger red object in the
+    background wins (seen live 2026-07-10: v=122 hit, mat starts at v~180).
+    """
     ranges = COLOR_RANGES.get(color)
     if ranges is None:
         raise ValueError(f'Unknown color "{color}" (have: {list(COLOR_RANGES)})')
+    off_u = off_v = 0
+    if roi is not None:
+        h, w = bgr.shape[:2]
+        u0 = max(0, min(w - 1, int(roi[0])))
+        v0 = max(0, min(h - 1, int(roi[1])))
+        u1 = max(u0 + 1, min(w, int(roi[2])))
+        v1 = max(v0 + 1, min(h, int(roi[3])))
+        bgr = bgr[v0:v1, u0:u1]
+        off_u, off_v = u0, v0
     hsv = cv2.cvtColor(cv2.GaussianBlur(bgr, (5, 5), 0), cv2.COLOR_BGR2HSV)
     mask = None
     for lo, hi in ranges:
@@ -101,7 +115,22 @@ def detect_block(bgr, color):
     if area < MIN_BLOB_AREA:
         return None
     m = cv2.moments(biggest)
-    return (m['m10'] / m['m00'], m['m01'] / m['m00'], area)
+    return (m['m10'] / m['m00'] + off_u, m['m01'] / m['m00'] + off_v, area)
+
+
+def roi_from_points(points, margin=60):
+    """Pixel bounding box of the calibration points (+margin) = the mat area."""
+    if not points:
+        return None
+    us = [p['pixel'][0] for p in points]
+    vs = [p['pixel'][1] for p in points]
+    return (min(us) - margin, min(vs) - margin, max(us) + margin, max(vs) + margin)
+
+
+def hover_z(x, z_hover):
+    """Far targets can't reach the standard hover height (IK refused
+    (0.25, y, 0.10) live) — approach them lower."""
+    return z_hover - 0.04 if x > 0.21 else z_hover
 
 
 # --- The planar map ----------------------------------------------------------------
@@ -245,14 +274,14 @@ class ArmIO:
             time.sleep(0.05)
         return None
 
-    def detect_median(self, color, samples=5):
+    def detect_median(self, color, samples=5, roi=None):
         """Median centroid over several frames — rejects single-frame flicker."""
         hits = []
         for _ in range(samples):
             frame = self.fresh_frame()
             if frame is None:
                 continue
-            det = detect_block(frame, color)
+            det = detect_block(frame, color, roi=roi)
             if det is not None:
                 hits.append(det[:2])
             time.sleep(0.15)
@@ -260,6 +289,20 @@ class ArmIO:
             return None
         arr = np.array(hits)
         return float(np.median(arr[:, 0])), float(np.median(arr[:, 1]))
+
+    def save_debug(self, path, det=None, roi=None):
+        """Write the last frame with the ROI box + detection dot for eyeballing."""
+        if self._frame is None:
+            return
+        img = self._frame.copy()
+        if roi is not None:
+            h, w = img.shape[:2]
+            cv2.rectangle(img, (max(0, int(roi[0])), max(0, int(roi[1]))),
+                          (min(w - 1, int(roi[2])), min(h - 1, int(roi[3]))),
+                          (0, 255, 0), 2)
+        if det is not None:
+            cv2.circle(img, (int(det[0]), int(det[1])), 12, (0, 0, 255), 3)
+        cv2.imwrite(path, img)
 
     # -- servos --
     def set_servos(self, duration, positions):
