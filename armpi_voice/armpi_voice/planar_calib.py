@@ -115,6 +115,9 @@ def tune_grip(node, x, y):
     if ask(f'\nTUNE PHASE: put the block on the mat DIRECTLY UNDER the jaws '
            f'(x={x:.3f}, y={y:.3f}), then press Enter (or abort): ') == 'abort':
         return None
+    print('Tip: first find the WIDEST jaw opening — type 100, watch the jaws, '
+          'then try 700; whichever direction opens wider, keep that value. The '
+          'jaws must clear the block with room to spare or the descent wedges it.')
 
     while True:
         if not io.move_xyz(x, y, z, node.pitch, node.pitch_range, duration=0.8):
@@ -211,6 +214,13 @@ def run(node) -> None:
     if len(pixels) < 3:
         print(f'\nOnly {len(pixels)} usable points — not enough to fit. Nothing saved.')
         return
+
+    spread_x = max(p[0] for p in xys) - min(p[0] for p in xys)
+    spread_y = max(p[1] for p in xys) - min(p[1] for p in xys)
+    if spread_x < 0.05 or spread_y < 0.05:
+        print(f'\nWARNING: accepted points span only {spread_x * 1000:.0f} x '
+              f'{spread_y * 1000:.0f} mm — the fit will extrapolate badly outside '
+              'that area. Strongly consider re-running with more spread-out points.')
 
     affine, residuals = pc.fit_affine(pixels, xys)
     print('\n=== Fit results ===')

@@ -76,9 +76,26 @@ def pick(node) -> bool:
     node.get_logger().info(
         f'{node.color} block at pixel ({det[0]:.1f}, {det[1]:.1f}) -> robot ({x:.3f}, {y:.3f})')
 
+    # Sanity: the affine is only trustworthy INSIDE the calibrated area. A
+    # target far outside it means a bad fit (too few / clustered points), not
+    # a real block position — refuse rather than command garbage.
+    cal_x = [pt['xy'][0] for pt in m.get('points', [])]
+    cal_y = [pt['xy'][1] for pt in m.get('points', [])]
+    if cal_x and not (min(cal_x) - 0.04 <= x <= max(cal_x) + 0.04
+                      and min(cal_y) - 0.04 <= y <= max(cal_y) + 0.04):
+        node.get_logger().error(
+            f'Mapped target ({x:.3f}, {y:.3f}) is far outside the calibrated area '
+            f'x[{min(cal_x):.3f},{max(cal_x):.3f}] y[{min(cal_y):.3f},{max(cal_y):.3f}] '
+            '-> the planar map is bad. Re-run planar_calib with more/spread-out points.')
+        node.say('My calibration map looks wrong. Please recalibrate me.')
+        return False
+
     io.gripper(grip_open)
     if not (io.move_xyz(x, y, z_hover, pitch, pitch_range)
             and io.move_xyz(x, y, z_place, pitch, pitch_range, duration=1.0)):
+        node.get_logger().error(
+            f'IK refused ({x:.3f}, {y:.3f}) at z_hover={z_hover} / z_place={z_place}, '
+            f'pitch={pitch} range={pitch_range}')
         node.say("I can't reach that spot.")
         return False
     io.gripper(grip_close)
