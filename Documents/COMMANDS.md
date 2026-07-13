@@ -17,6 +17,9 @@ curl -fsSL "$BASE/install_piper.sh?v=$(date +%s)" | bash
 
 # (espeak fallback, if you ever want it)
 sudo apt-get install -y espeak-ng
+
+# Voice INPUT (faster-whisper STT + silent self-test):
+curl -fsSL "$BASE/install_stt.sh?v=$(date +%s)" | bash
 ```
 
 ---
@@ -42,6 +45,12 @@ what can you do?
 ```
 The pick commands need `~/planar_map.yaml` (run `planar_calib` once — sec 5b) and
 the depth camera; chat.sh now auto-starts the camera if it isn't running.
+
+**Hands-free (speak instead of type):** `ARMPI_STT=1 ARMPI_MIC=plughw:1,0 bash chat.sh`
+(mic device from `arecord -l`; needs install_stt.sh once). STT is OPT-IN because an
+open mic in a shared room lets anyone's conversation command the robot. The robot
+mutes its ears while speaking (/tts_busy) so it never obeys its own voice. Typing
+in the console keeps working alongside — both feed /voice_words.
 
 ---
 

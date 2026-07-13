@@ -33,6 +33,7 @@ source /opt/ros/humble/setup.bash 2>/dev/null || true
 cleanup() {
     echo
     echo "Shutting down background services..."
+    [ -n "${STT_PID:-}" ]   && kill "$STT_PID" 2>/dev/null
     [ -n "${TTS_PID:-}" ]   && kill "$TTS_PID" 2>/dev/null
     [ -n "${AGENT_PID:-}" ] && kill "$AGENT_PID" 2>/dev/null
     [ -n "${SDK_PID:-}" ]   && kill -INT "$SDK_PID" 2>/dev/null
@@ -98,6 +99,20 @@ elif command -v espeak-ng >/dev/null 2>&1; then
     TTS_PID=$!
 else
     echo "(No TTS engine found — skipping voice. Install espeak-ng or run install_piper.sh.)"
+fi
+
+# Voice INPUT (STT) — OPT-IN with ARMPI_STT=1 (an open mic in a shared room
+# would let anyone's conversation command the robot). Mic via ARMPI_MIC
+# (see `arecord -l`; the WonderEcho Pro is a USB PnP Audio device).
+if [ -n "${ARMPI_STT:-}" ]; then
+    if python3 -c 'import faster_whisper' 2>/dev/null; then
+        echo "Starting voice input (faster-whisper STT)..."
+        ros2 run armpi_voice stt_node --ros-args \
+            -p mic_device:="${ARMPI_MIC:-default}" >/tmp/armpi_stt.log 2>&1 &
+        STT_PID=$!
+    else
+        echo "(ARMPI_STT set but faster-whisper missing — run install_stt.sh.)"
+    fi
 fi
 
 echo "Waiting ~8s for hardware + agent to come up..."

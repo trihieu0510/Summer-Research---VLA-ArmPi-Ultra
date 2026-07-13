@@ -30,7 +30,7 @@ import rclpy
 # pyrefly: ignore [missing-import]
 from rclpy.node import Node
 # pyrefly: ignore [missing-import]
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 
 
 class TTSNode(Node):
@@ -47,6 +47,9 @@ class TTSNode(Node):
         # ALSA output device, e.g. 'plughw:2,0' for the USB speaker (card 2).
         # Empty = system default (often HDMI, which won't reach the speaker).
         self.declare_parameter('alsa_device', '')
+        # Half-duplex signal: True while speaking, so stt_node mutes the mic
+        # and the robot doesn't transcribe (and obey!) its own voice.
+        self.declare_parameter('busy_topic', '/tts_busy')
 
         self.speech_topic = self.get_parameter('speech_topic').value
         self.engine = self.get_parameter('engine').value
@@ -55,6 +58,7 @@ class TTSNode(Node):
         self.piper_model = self.get_parameter('piper_model').value
         self.piper_bin = self.get_parameter('piper_bin').value
         self.alsa_device = self.get_parameter('alsa_device').value
+        self.busy_pub = self.create_publisher(Bool, self.get_parameter('busy_topic').value, 10)
 
         # Serialize utterances on a worker thread so playback never blocks the
         # executor and replies don't overlap into garbled audio.
@@ -80,6 +84,7 @@ class TTSNode(Node):
             except queue.Empty:
                 continue
             try:
+                self.busy_pub.publish(Bool(data=True))
                 self._speak(text)
             except FileNotFoundError:
                 self.get_logger().error(
@@ -89,6 +94,7 @@ class TTSNode(Node):
             except Exception as exc:
                 self.get_logger().error(f'TTS failed for "{text}": {exc}')
             finally:
+                self.busy_pub.publish(Bool(data=False))
                 self._q.task_done()
 
     def _aplay_cmd(self):
