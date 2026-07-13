@@ -235,10 +235,16 @@ def load_map(path):
         xys = [p['xy'] for p in points]
         H, kept, res = fit_planar(pixels, xys)
         data['H'] = H
+        # The map is only trustworthy where SURVIVING points support it —
+        # dropped outliers must not extend the trusted zone (live failure:
+        # far-row points got rejected, yet far targets passed the guard and
+        # the arm overshot "in front of the cube").
+        data['kept_points'] = [points[i] for i in kept]
         data['fit_info'] = (f'{len(kept)}/{len(points)} points kept, '
                             f'worst {res.max() * 1000:.1f}mm')
     elif 'homography' in data:
         data['H'] = np.asarray(data['homography'])
+        data['kept_points'] = []
         data['fit_info'] = 'stored homography (no raw points)'
     else:
         raise ValueError(f'{path} has neither enough points nor a homography.')
@@ -403,10 +409,11 @@ def run_pick(node, io, color, map_path, say, place_after=False,
     node.get_logger().info(
         f'{color} block at pixel ({det[0]:.1f}, {det[1]:.1f}) -> robot ({x:.3f}, {y:.3f})')
 
-    # Targets far outside the calibrated area are physically out of reach
-    # (the arm can't grasp beyond ~x=0.22) or a bad detection — refuse.
-    cal_x = [pt['xy'][0] for pt in m.get('points', [])]
-    cal_y = [pt['xy'][1] for pt in m.get('points', [])]
+    # Targets outside the SUPPORTED area (surviving fit points only) are
+    # extrapolation — physically out of reach or a bad detection. Refuse.
+    support = m.get('kept_points') or m.get('points', [])
+    cal_x = [pt['xy'][0] for pt in support]
+    cal_y = [pt['xy'][1] for pt in support]
     if cal_x and not (min(cal_x) - 0.04 <= x <= max(cal_x) + 0.04
                       and min(cal_y) - 0.04 <= y <= max(cal_y) + 0.04):
         node.get_logger().error(
