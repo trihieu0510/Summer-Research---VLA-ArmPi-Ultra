@@ -414,8 +414,10 @@ def run_pick(node, io, color, map_path, say, place_after=False,
     support = m.get('kept_points') or m.get('points', [])
     cal_x = [pt['xy'][0] for pt in support]
     cal_y = [pt['xy'][1] for pt in support]
-    if cal_x and not (min(cal_x) - 0.04 <= x <= max(cal_x) + 0.04
-                      and min(cal_y) - 0.04 <= y <= max(cal_y) + 0.04):
+    # 2.5cm margin: a good map degrades fast beyond its last supported row
+    # (4cm of grace produced "too in front of the cube" overshoots live).
+    if cal_x and not (min(cal_x) - 0.025 <= x <= max(cal_x) + 0.025
+                      and min(cal_y) - 0.025 <= y <= max(cal_y) + 0.025):
         node.get_logger().error(
             f'Mapped target ({x:.3f}, {y:.3f}) outside calibrated area '
             f'x[{min(cal_x):.3f},{max(cal_x):.3f}] y[{min(cal_y):.3f},{max(cal_y):.3f}].')
