@@ -43,6 +43,13 @@ RATE = 16000                      # faster-whisper's native rate
 FRAME_MS = 30                     # webrtcvad accepts 10/20/30 ms frames
 FRAME_BYTES = RATE * 2 * FRAME_MS // 1000   # S16_LE mono -> 960 bytes
 
+# Whisper's stock hallucinations on breaths/noise — never real commands.
+# (Live log 2026-07-13: a string of bare "You" utterances hit the LLM.)
+NOISE_TRANSCRIPTS = {
+    'you', 'the', 'uh', 'um', 'oh', 'hmm', 'yeah', 'okay', 'bye',
+    'thank you', 'thanks', 'thanks for watching', 'thank you for watching',
+}
+
 
 class STTNode(Node):
     """Streams the mic, segments utterances by voice activity, transcribes."""
@@ -174,6 +181,9 @@ class STTNode(Node):
         text = ' '.join(s.text.strip() for s in segments).strip()
         latency = time.monotonic() - t0
         if not text or len(text) < 3:
+            return
+        if text.lower().strip(' .,!?') in NOISE_TRANSCRIPTS:
+            self.get_logger().info(f'(noise, dropped): "{text}"')
             return
         if self.wake_word:
             low = text.lower()
