@@ -81,6 +81,10 @@ class ArmAgent(Node):
         self.declare_parameter('speech_topic', '/robot_speech')
         self.declare_parameter('request_timeout', 30.0)
         self.declare_parameter('history_turns', 4)
+        # deepseek-v4-flash THINKS by default (the retired 'deepseek-chat' name
+        # was its non-thinking alias) — hidden reasoning adds seconds per turn.
+        # A robot command loop wants fast reflexes, not deliberation.
+        self.declare_parameter('disable_thinking', True)
         # Pick skill (needs a planar_map.yaml from planar_calib + the camera):
         self.declare_parameter('camera_topic', '/depth_cam/rgb/image_raw')
         self.declare_parameter('map_path', '~/planar_map.yaml')
@@ -92,6 +96,7 @@ class ArmAgent(Node):
         speech_topic = self.get_parameter('speech_topic').value
         self.request_timeout = float(self.get_parameter('request_timeout').value)
         history_turns = int(self.get_parameter('history_turns').value)
+        self.disable_thinking = bool(self.get_parameter('disable_thinking').value)
 
         # --- LLM client (any OpenAI-compatible endpoint: Ollama, DeepSeek, OpenAI) ---
         api_key = (
@@ -227,14 +232,31 @@ class ArmAgent(Node):
         messages.extend(self._history)
         messages.append({"role": "user", "content": text})
 
-        response = self.llm_client.chat.completions.create(
+        kwargs = dict(
             model=self.model_name,
             messages=messages,
             temperature=0.3,
             response_format={"type": "json_object"},
         )
+        if self.disable_thinking:
+            kwargs['extra_body'] = {'thinking': {'type': 'disabled'}}
+
+        t0 = time.time()
+        try:
+            response = self.llm_client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            # If the endpoint rejects the thinking field, drop it permanently
+            # and retry once — better slow than broken.
+            if self.disable_thinking and 'thinking' in str(exc).lower():
+                self.get_logger().warn(
+                    f'Endpoint rejected thinking param ({exc}); retrying without it.')
+                self.disable_thinking = False
+                kwargs.pop('extra_body', None)
+                response = self.llm_client.chat.completions.create(**kwargs)
+            else:
+                raise
         content = (response.choices[0].message.content or "").strip()
-        self.get_logger().info(f'LLM response: {content}')
+        self.get_logger().info(f'LLM replied in {time.time() - t0:.1f}s: {content}')
         steps, say = self._parse_reply(content)
 
         self._history.append({"role": "user", "content": text})

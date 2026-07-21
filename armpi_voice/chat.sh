@@ -37,7 +37,9 @@ cleanup() {
     [ -n "${TTS_PID:-}" ]   && kill "$TTS_PID" 2>/dev/null
     [ -n "${AGENT_PID:-}" ] && kill "$AGENT_PID" 2>/dev/null
     [ -n "${SDK_PID:-}" ]   && kill -INT "$SDK_PID" 2>/dev/null
-    [ -n "${CAM_PID:-}" ]   && kill -INT "$CAM_PID" 2>/dev/null   # only if WE started it
+    # Deliberately NOT killing the camera: stopping it on every chat exit kept
+    # racing the next session's restart against USB release (0x21003 busy).
+    # The camera stays up across sessions; it costs little and dies rarely.
     wait 2>/dev/null
     echo "bye."
 }
