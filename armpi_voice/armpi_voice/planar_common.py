@@ -336,8 +336,13 @@ class ArmIO:
         if len(hits) < max(2, samples // 2):
             return None
         arr = np.array(hits)
-        return (float(np.median(arr[:, 0])), float(np.median(arr[:, 1])),
-                float(np.median(arr[:, 2])))
+        # Angle is mod-90 (square block): a plain median flips sign near the
+        # +/-45 wrap (+44 vs -44 are 2 deg apart, not 88). Average on the
+        # 4x-angle circle instead — the correct mean for mod-90 quantities.
+        rad4 = np.radians(arr[:, 2] * 4.0)
+        ang = float(np.degrees(np.arctan2(np.mean(np.sin(rad4)),
+                                          np.mean(np.cos(rad4)))) / 4.0)
+        return (float(np.median(arr[:, 0])), float(np.median(arr[:, 1])), ang)
 
     def save_debug(self, path, det=None, roi=None):
         """Write the last frame with the ROI box + detection dot for eyeballing."""
@@ -351,6 +356,12 @@ class ArmIO:
                           (0, 255, 0), 2)
         if det is not None:
             cv2.circle(img, (int(det[0]), int(det[1])), 12, (0, 0, 255), 3)
+            if len(det) > 2:      # draw the estimated orientation through the center
+                import math
+                ca = math.cos(math.radians(det[2]))
+                sa = math.sin(math.radians(det[2]))
+                cv2.line(img, (int(det[0] - 50 * ca), int(det[1] - 50 * sa)),
+                         (int(det[0] + 50 * ca), int(det[1] + 50 * sa)), (255, 0, 0), 2)
         cv2.imwrite(path, img)
 
     # -- servos --
@@ -464,6 +475,8 @@ def run_pick(node, io, color, map_path, say, place_after=False,
     # Align the jaws with the block's orientation — an axis-aligned grip on a
     # rotated block catches a corner/edge instead of the faces (seen live).
     wrist = wrist_delta_units(m['H'], det[0], det[1], det[2], x, y, sign=wrist_sign)
+    if abs(wrist) < 25:   # <~6 deg is angle noise, not rotation — grip straight
+        wrist = 0
     node.get_logger().info(f'block angle {det[2]:.0f}° in image -> wrist delta {wrist} units')
 
     z_pl = far_z(x, z_place)
