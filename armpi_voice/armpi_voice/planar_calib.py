@@ -198,7 +198,7 @@ def run(node) -> None:
                 print(f'Detected at pixel ({det[0]:.1f}, {det[1]:.1f})')
                 choice = ask('Accept? Enter = yes, r = retry, s = skip, abort: ')
                 if choice in ('', 'y', 'yes'):
-                    pixels.append(det)
+                    pixels.append((det[0], det[1]))
                     xys.append((x, y))
                     audit.append({'pixel': [det[0], det[1]], 'xy': [x, y]})
                     choice = 'accepted'

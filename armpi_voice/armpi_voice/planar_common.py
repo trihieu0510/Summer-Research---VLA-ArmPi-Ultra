@@ -114,8 +114,13 @@ def detect_block(bgr, color, roi=None):
     area = cv2.contourArea(biggest)
     if area < MIN_BLOB_AREA:
         return None
-    m = cv2.moments(biggest)
-    return (m['m10'] / m['m00'] + off_u, m['m01'] / m['m00'] + off_v, area)
+    # minAreaRect: center is steadier than the moment centroid on partial
+    # masks, and the angle lets the wrist align the jaws to a rotated block.
+    (cx, cy), _size, angle = cv2.minAreaRect(biggest)
+    angle = angle % 90.0
+    if angle > 45.0:
+        angle -= 90.0           # square block: orientation is mod 90, in [-45, 45)
+    return (cx + off_u, cy + off_v, area, angle)
 
 
 def roi_from_points(points, margin=60):
@@ -131,6 +136,27 @@ def hover_z(x, z_hover):
     """Far targets can't reach the standard hover height (IK refused
     (0.25, y, 0.10) live) — approach them lower."""
     return z_hover - 0.04 if x > 0.21 else z_hover
+
+
+def wrist_delta_units(H, u, v, angle_img_deg, x, y, sign=1):
+    """Wrist-roll offset (servo units) to align the jaws with a rotated block.
+
+    The block's image angle is mapped through the homography to a world angle,
+    then compared to the arm's radial direction at the target (IK aligns the
+    jaws radially by default). 0.24 deg/unit; result clamped to +/-45 deg.
+    `sign` flips direction if the wrist turns the wrong way on hardware.
+    """
+    import math
+    du = math.cos(math.radians(angle_img_deg))
+    dv = math.sin(math.radians(angle_img_deg))
+    x0, y0 = apply_planar(H, u, v)
+    x1, y1 = apply_planar(H, u + 20 * du, v + 20 * dv)
+    yaw_world = math.degrees(math.atan2(y1 - y0, x1 - x0))
+    radial = math.degrees(math.atan2(y, x))
+    delta = (yaw_world - radial) % 90.0
+    if delta > 45.0:
+        delta -= 90.0
+    return int(round(sign * delta / 0.24))
 
 
 # --- The planar map ----------------------------------------------------------------
@@ -293,7 +319,11 @@ class ArmIO:
         return None
 
     def detect_median(self, color, samples=5, roi=None):
-        """Median centroid over several frames — rejects single-frame flicker."""
+        """Median centroid+angle over several frames — rejects flicker.
+
+        Returns (u, v, angle_deg) or None; angle is the block's image-frame
+        orientation in [-45, 45).
+        """
         hits = []
         for _ in range(samples):
             frame = self.fresh_frame()
@@ -301,12 +331,13 @@ class ArmIO:
                 continue
             det = detect_block(frame, color, roi=roi)
             if det is not None:
-                hits.append(det[:2])
+                hits.append((det[0], det[1], det[3]))
             time.sleep(0.15)
         if len(hits) < max(2, samples // 2):
             return None
         arr = np.array(hits)
-        return float(np.median(arr[:, 0])), float(np.median(arr[:, 1]))
+        return (float(np.median(arr[:, 0])), float(np.median(arr[:, 1])),
+                float(np.median(arr[:, 2])))
 
     def save_debug(self, path, det=None, roi=None):
         """Write the last frame with the ROI box + detection dot for eyeballing."""
@@ -368,13 +399,19 @@ class ArmIO:
             return None
         return list(resp.pulse)
 
-    def move_xyz(self, x, y, z, pitch, pitch_range, duration=1.5):
-        """IK + execute. Returns True on success. Gripper is left untouched."""
+    def move_xyz(self, x, y, z, pitch, pitch_range, duration=1.5, wrist_delta=None):
+        """IK + execute. Returns True on success. Gripper is left untouched.
+
+        wrist_delta (servo units) is added to the IK's servo-2 (wrist roll)
+        solution so the jaws track a rotated block through the approach.
+        """
         pulses = self.ik_solve(x, y, z, pitch, pitch_range, duration=duration)
         if pulses is None or len(pulses) != 5:
             self.node.get_logger().warn(f'IK failed for ({x:.3f}, {y:.3f}, {z:.3f})')
             return False
         pairs = list(zip((6, 5, 4, 3, 2), pulses))
+        if wrist_delta:
+            pairs = [(sid, p + wrist_delta if sid == 2 else p) for sid, p in pairs]
         self.set_servos(duration, pairs)
         return True
 
@@ -382,7 +419,7 @@ class ArmIO:
 # --- The pick behavior (shared by planar_pick CLI and arm_agent chat skill) --------
 
 def run_pick(node, io, color, map_path, say, place_after=False,
-             place_x=0.13, place_y=-0.12):
+             place_x=0.13, place_y=-0.12, wrist_sign=1):
     """Detect the colored block, map to robot XY, grasp, verify. True on success.
 
     `say` is a callback(str) — publishes to /robot_speech in both callers, so
@@ -424,18 +461,23 @@ def run_pick(node, io, color, map_path, say, place_after=False,
         say(f'The {color} block is outside the zone I can reach.')
         return False
 
+    # Align the jaws with the block's orientation — an axis-aligned grip on a
+    # rotated block catches a corner/edge instead of the faces (seen live).
+    wrist = wrist_delta_units(m['H'], det[0], det[1], det[2], x, y, sign=wrist_sign)
+    node.get_logger().info(f'block angle {det[2]:.0f}° in image -> wrist delta {wrist} units')
+
     z_pl = far_z(x, z_place)
     z_hv = hover_z(x, z_hover)
     io.gripper(grip_open)
-    if not (io.move_xyz(x, y, z_hv, pitch, pitch_range)
-            and io.move_xyz(x, y, z_pl, pitch, pitch_range, duration=1.0)):
+    if not (io.move_xyz(x, y, z_hv, pitch, pitch_range, wrist_delta=wrist)
+            and io.move_xyz(x, y, z_pl, pitch, pitch_range, duration=1.0, wrist_delta=wrist)):
         node.get_logger().error(
             f'IK refused ({x:.3f}, {y:.3f}) at z_hover={z_hv} / z_place={z_pl}, '
             f'pitch={pitch} range={pitch_range}')
         say("I can't reach that spot.")
         return False
     io.gripper(grip_close)
-    io.move_xyz(x, y, z_hv, pitch, pitch_range, duration=1.0)
+    io.move_xyz(x, y, z_hv, pitch, pitch_range, duration=1.0, wrist_delta=wrist)
 
     # Verify: any blob still ON THE MAT means the grasp failed — same spot is
     # a clean miss, elsewhere means we knocked it. A held block only ever

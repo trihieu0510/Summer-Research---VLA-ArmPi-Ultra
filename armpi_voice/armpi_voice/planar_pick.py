@@ -39,6 +39,8 @@ class PlanarPick(Node):
         self.declare_parameter('place_after', False)
         self.declare_parameter('place_x', 0.13)
         self.declare_parameter('place_y', -0.12)
+        # Flip to -1 if the wrist rotates AWAY from the block's angle on test.
+        self.declare_parameter('wrist_sign', 1)
         self.declare_parameter('speech_topic', '/robot_speech')
 
         p = lambda name: self.get_parameter(name).value  # noqa: E731
@@ -47,6 +49,7 @@ class PlanarPick(Node):
         self.place_after = bool(p('place_after'))
         self.place_x = float(p('place_x'))
         self.place_y = float(p('place_y'))
+        self.wrist_sign = int(p('wrist_sign'))
 
         self.speech_pub = self.create_publisher(String, p('speech_topic'), 10)
         self.io = pc.ArmIO(self, p('camera_topic'))
@@ -61,7 +64,8 @@ def pick(node) -> bool:
     # with arm_agent's chat "pick" step, so CLI and chat can't drift apart.
     return pc.run_pick(node, node.io, node.color, node.map_path, node.say,
                        place_after=node.place_after,
-                       place_x=node.place_x, place_y=node.place_y)
+                       place_x=node.place_x, place_y=node.place_y,
+                       wrist_sign=node.wrist_sign)
 
 
 def main(args=None) -> None:
