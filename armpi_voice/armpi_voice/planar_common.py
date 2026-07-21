@@ -475,7 +475,10 @@ def run_pick(node, io, color, map_path, say, place_after=False,
     # Align the jaws with the block's orientation — an axis-aligned grip on a
     # rotated block catches a corner/edge instead of the faces (seen live).
     wrist = wrist_delta_units(m['H'], det[0], det[1], det[2], x, y, sign=wrist_sign)
-    if abs(wrist) < 25:   # <~6 deg is angle noise, not rotation — grip straight
+    # Wide jaws forgive ~15-20 deg of misalignment on a square block (proven by
+    # pre-rotation corner grips), and every rotation risks shifting the grasp
+    # point — so only rotate when it genuinely matters (>~13 deg).
+    if abs(wrist) < 55:
         wrist = 0
     node.get_logger().info(f'block angle {det[2]:.0f}° in image -> wrist delta {wrist} units')
 
