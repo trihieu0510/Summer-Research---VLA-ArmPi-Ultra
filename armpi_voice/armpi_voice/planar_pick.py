@@ -45,6 +45,10 @@ class PlanarPick(Node):
         # heights: trim_x/trim_y). +x forward, +y left (viewed from BEHIND).
         self.declare_parameter('trim_x', 0.0)
         self.declare_parameter('trim_y', 0.0)
+        # Scan neighboring base sectors (~±36°) when the block isn't in front.
+        self.declare_parameter('scan', True)
+        # Flip to -1 if sector picks land mirrored around the base axis.
+        self.declare_parameter('base_rot_sign', 1)
         self.declare_parameter('speech_topic', '/robot_speech')
 
         p = lambda name: self.get_parameter(name).value  # noqa: E731
@@ -56,6 +60,8 @@ class PlanarPick(Node):
         self.wrist_sign = int(p('wrist_sign'))
         self.trim_x = float(p('trim_x'))
         self.trim_y = float(p('trim_y'))
+        self.scan = bool(p('scan'))
+        self.base_rot_sign = int(p('base_rot_sign'))
 
         self.speech_pub = self.create_publisher(String, p('speech_topic'), 10)
         self.io = pc.ArmIO(self, p('camera_topic'))
@@ -72,7 +78,8 @@ def pick(node) -> bool:
                        place_after=node.place_after,
                        place_x=node.place_x, place_y=node.place_y,
                        wrist_sign=node.wrist_sign,
-                       trim_x=node.trim_x, trim_y=node.trim_y)
+                       trim_x=node.trim_x, trim_y=node.trim_y,
+                       scan=node.scan, base_rot_sign=node.base_rot_sign)
 
 
 def main(args=None) -> None:

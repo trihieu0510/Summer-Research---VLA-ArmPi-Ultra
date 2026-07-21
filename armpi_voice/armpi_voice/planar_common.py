@@ -21,6 +21,7 @@ Runs ON THE PI, inside the Hiwonder ROS 2 Humble Docker container.
 """
 
 import importlib
+import math
 import os
 import time
 
@@ -132,26 +133,33 @@ def roi_from_points(points, margin=60):
     return (min(us) - margin, min(vs) - margin, max(us) + margin, max(vs) + margin)
 
 
-def hover_z(x, z_hover):
+def hover_z(r, z_hover):
     """Far targets can't reach the standard hover height (IK refused
-    (0.25, y, 0.10) live) — approach them lower."""
-    return z_hover - 0.04 if x > 0.21 else z_hover
+    (0.25, y, 0.10) live) — approach them lower. r = hypot(x, y)."""
+    return z_hover - 0.04 if r > 0.21 else z_hover
 
 
-def wrist_delta_units(H, u, v, angle_img_deg, x, y, sign=1):
+def rotate_xy(x, y, deg):
+    """Rotate a point about the base axis (deg counter-clockwise from above)."""
+    rad = math.radians(deg)
+    c, s = math.cos(rad), math.sin(rad)
+    return c * x - s * y, s * x + c * y
+
+
+def wrist_delta_units(H, u, v, angle_img_deg, x, y, sign=1, extra_rot_deg=0.0):
     """Wrist-roll offset (servo units) to align the jaws with a rotated block.
 
-    The block's image angle is mapped through the homography to a world angle,
-    then compared to the arm's radial direction at the target (IK aligns the
-    jaws radially by default). 0.24 deg/unit; result clamped to +/-45 deg.
-    `sign` flips direction if the wrist turns the wrong way on hardware.
+    The block's image angle is mapped through the homography to a world angle
+    (plus extra_rot_deg when detected from a rotated base sector), then
+    compared to the arm's radial direction at the TRUE target (x, y).
+    0.24 deg/unit; result clamped to +/-45 deg. `sign` flips direction if the
+    wrist turns the wrong way on hardware.
     """
-    import math
     du = math.cos(math.radians(angle_img_deg))
     dv = math.sin(math.radians(angle_img_deg))
     x0, y0 = apply_planar(H, u, v)
     x1, y1 = apply_planar(H, u + 20 * du, v + 20 * dv)
-    yaw_world = math.degrees(math.atan2(y1 - y0, x1 - x0))
+    yaw_world = math.degrees(math.atan2(y1 - y0, x1 - x0)) + extra_rot_deg
     radial = math.degrees(math.atan2(y, x))
     delta = (yaw_world - radial) % 90.0
     if delta > 45.0:
@@ -226,14 +234,14 @@ def apply_planar(H, u, v):
     return float(q[0] / q[2]), float(q[1] / q[2])
 
 
-def far_z(x, z):
+def far_z(r, z):
     """Height compensation at reach — the arm droops as it extends (dug into
     the mat at far grid points, bending a gripper screw on 2026-07-10).
-    Graded, not a single step: +5mm beyond x=0.19, +10mm beyond x=0.22
-    (Hiwonder's own demo uses +10mm past 0.22)."""
-    if x > 0.22:
+    Graded on the radial distance r=hypot(x,y): +5mm beyond 0.19, +10mm
+    beyond 0.22 (Hiwonder's own demo uses +10mm past x=0.22)."""
+    if r > 0.22:
         return z + 0.010
-    if x > 0.19:
+    if r > 0.19:
         return z + 0.005
     return z
 
@@ -429,10 +437,19 @@ class ArmIO:
 
 # --- The pick behavior (shared by planar_pick CLI and arm_agent chat skill) --------
 
+# Base-rotation sectors to scan when the block isn't in front: the camera is
+# ARM-MOUNTED, so rotating ONLY the base shows a new patch of table with
+# IDENTICAL camera geometry — the same homography applies, and the result just
+# rotates back by the base angle. One calibration, three sectors of workspace.
+SCAN_SECTORS = [0, 150, -150]          # servo-6 pulse offsets (~±36°)
+DEG_PER_UNIT = 0.24
+
+
 def run_pick(node, io, color, map_path, say, place_after=False,
              place_x=0.13, place_y=-0.12, wrist_sign=1,
-             trim_x=0.0, trim_y=0.0):
-    """Detect the colored block, map to robot XY, grasp, verify. True on success.
+             trim_x=0.0, trim_y=0.0, scan=True, base_rot_sign=1):
+    """Detect the colored block (scanning left/right if needed), map to robot
+    XY, grasp, verify. True on success.
 
     `say` is a callback(str) — publishes to /robot_speech in both callers, so
     the robot narrates outcomes identically from the CLI and from the chat.
@@ -447,40 +464,53 @@ def run_pick(node, io, color, map_path, say, place_after=False,
     grip_open = h.get('gripper_open', GRIPPER_OPEN)
     roi = roi_from_points(m.get('points'))
 
-    io.go_view_pose(m['view_pose'])
-    det = io.detect_median(color, roi=roi)
-    io.save_debug('/tmp/pick_debug.jpg', det, roi)   # eyeball what it saw
+    det, sector, vp = None, 0, m['view_pose']
+    for delta in (SCAN_SECTORS if scan else [0]):
+        vp = dict(m['view_pose'])
+        vp[6] = vp[6] + delta
+        io.go_view_pose(vp)
+        det = io.detect_median(color, roi=roi)
+        io.save_debug('/tmp/pick_debug.jpg', det, roi)   # eyeball what it saw
+        if det is not None:
+            sector = delta
+            if delta:
+                node.get_logger().info(f'Found after rotating base {delta:+d} units.')
+            break
     if det is None:
-        say(f"I can't see a {color} block on the mat.")
+        say(f"I can't see a {color} block anywhere I looked.")
         return False
+    rot_deg = sector * DEG_PER_UNIT * base_rot_sign
 
-    x, y = apply_planar(m['H'], det[0], det[1])
-    # Constant grasp trim, measured live (+x = forward/away from base,
-    # +y = left as seen from BEHIND the arm). Persistable via the map's
-    # heights section (trim_x/trim_y) once dialed in.
-    x += trim_x if trim_x else h.get('trim_x', 0.0)
-    y += trim_y if trim_y else h.get('trim_y', 0.0)
-    node.get_logger().info(
-        f'{color} block at pixel ({det[0]:.1f}, {det[1]:.1f}) -> robot ({x:.3f}, {y:.3f})')
+    qx, qy = apply_planar(m['H'], det[0], det[1])
 
-    # Targets outside the SUPPORTED area (surviving fit points only) are
-    # extrapolation — physically out of reach or a bad detection. Refuse.
+    # Zone guard runs in the CALIBRATION frame (pre-rotation): outside the
+    # supported area = extrapolation — bad detection or out of reach. Refuse.
     support = m.get('kept_points') or m.get('points', [])
     cal_x = [pt['xy'][0] for pt in support]
     cal_y = [pt['xy'][1] for pt in support]
     # 2.5cm margin: a good map degrades fast beyond its last supported row
     # (4cm of grace produced "too in front of the cube" overshoots live).
-    if cal_x and not (min(cal_x) - 0.025 <= x <= max(cal_x) + 0.025
-                      and min(cal_y) - 0.025 <= y <= max(cal_y) + 0.025):
+    if cal_x and not (min(cal_x) - 0.025 <= qx <= max(cal_x) + 0.025
+                      and min(cal_y) - 0.025 <= qy <= max(cal_y) + 0.025):
         node.get_logger().error(
-            f'Mapped target ({x:.3f}, {y:.3f}) outside calibrated area '
+            f'Mapped target ({qx:.3f}, {qy:.3f}) outside calibrated area '
             f'x[{min(cal_x):.3f},{max(cal_x):.3f}] y[{min(cal_y):.3f},{max(cal_y):.3f}].')
         say(f'The {color} block is outside the zone I can reach.')
         return False
 
+    # Rotate into the TRUE robot frame, then apply the measured grasp trim
+    # (+x = forward, +y = left as seen from BEHIND the arm).
+    x, y = rotate_xy(qx, qy, rot_deg)
+    x += trim_x if trim_x else h.get('trim_x', 0.0)
+    y += trim_y if trim_y else h.get('trim_y', 0.0)
+    node.get_logger().info(
+        f'{color} block at pixel ({det[0]:.1f}, {det[1]:.1f}), sector {sector:+d} '
+        f'-> robot ({x:.3f}, {y:.3f})')
+
     # Align the jaws with the block's orientation — an axis-aligned grip on a
     # rotated block catches a corner/edge instead of the faces (seen live).
-    wrist = wrist_delta_units(m['H'], det[0], det[1], det[2], x, y, sign=wrist_sign)
+    wrist = wrist_delta_units(m['H'], det[0], det[1], det[2], x, y,
+                              sign=wrist_sign, extra_rot_deg=rot_deg)
     # Wide jaws forgive ~15-20 deg of misalignment on a square block (proven by
     # pre-rotation corner grips), and every rotation risks shifting the grasp
     # point — so only rotate when it genuinely matters (>~13 deg).
@@ -488,8 +518,9 @@ def run_pick(node, io, color, map_path, say, place_after=False,
         wrist = 0
     node.get_logger().info(f'block angle {det[2]:.0f}° in image -> wrist delta {wrist} units')
 
-    z_pl = far_z(x, z_place)
-    z_hv = hover_z(x, z_hover)
+    r = math.hypot(x, y)
+    z_pl = far_z(r, z_place)
+    z_hv = hover_z(r, z_hover)
     io.gripper(grip_open)
     if not (io.move_xyz(x, y, z_hv, pitch, pitch_range, wrist_delta=wrist)
             and io.move_xyz(x, y, z_pl, pitch, pitch_range, duration=1.0, wrist_delta=wrist)):
@@ -504,7 +535,7 @@ def run_pick(node, io, color, map_path, say, place_after=False,
     # Verify: any blob still ON THE MAT means the grasp failed — same spot is
     # a clean miss, elsewhere means we knocked it. A held block only ever
     # appears in the bottom strip of the frame, where the gripper is.
-    io.go_view_pose(m['view_pose'])
+    io.go_view_pose(vp)                     # same sector we found it in
     still_there = io.detect_median(color, samples=3, roi=roi)
     if still_there is not None:
         du, dv = still_there[0] - det[0], still_there[1] - det[1]
@@ -517,9 +548,10 @@ def run_pick(node, io, color, map_path, say, place_after=False,
             return False
 
     if place_after:
-        place_hv = hover_z(place_x, z_hover)
+        place_r = math.hypot(place_x, place_y)
+        place_hv = hover_z(place_r, z_hover)
         if (io.move_xyz(place_x, place_y, place_hv, pitch, pitch_range)
-                and io.move_xyz(place_x, place_y, far_z(place_x, z_place),
+                and io.move_xyz(place_x, place_y, far_z(place_r, z_place),
                                 pitch, pitch_range, duration=1.0)):
             io.gripper(grip_open)
             io.move_xyz(place_x, place_y, place_hv, pitch, pitch_range, duration=1.0)
