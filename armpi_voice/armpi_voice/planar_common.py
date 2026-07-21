@@ -430,7 +430,8 @@ class ArmIO:
 # --- The pick behavior (shared by planar_pick CLI and arm_agent chat skill) --------
 
 def run_pick(node, io, color, map_path, say, place_after=False,
-             place_x=0.13, place_y=-0.12, wrist_sign=1):
+             place_x=0.13, place_y=-0.12, wrist_sign=1,
+             trim_x=0.0, trim_y=0.0):
     """Detect the colored block, map to robot XY, grasp, verify. True on success.
 
     `say` is a callback(str) — publishes to /robot_speech in both callers, so
@@ -454,6 +455,11 @@ def run_pick(node, io, color, map_path, say, place_after=False,
         return False
 
     x, y = apply_planar(m['H'], det[0], det[1])
+    # Constant grasp trim, measured live (+x = forward/away from base,
+    # +y = left as seen from BEHIND the arm). Persistable via the map's
+    # heights section (trim_x/trim_y) once dialed in.
+    x += trim_x if trim_x else h.get('trim_x', 0.0)
+    y += trim_y if trim_y else h.get('trim_y', 0.0)
     node.get_logger().info(
         f'{color} block at pixel ({det[0]:.1f}, {det[1]:.1f}) -> robot ({x:.3f}, {y:.3f})')
 

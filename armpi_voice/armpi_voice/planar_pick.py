@@ -41,6 +41,10 @@ class PlanarPick(Node):
         self.declare_parameter('place_y', -0.12)
         # Flip to -1 if the wrist rotates AWAY from the block's angle on test.
         self.declare_parameter('wrist_sign', 1)
+        # Constant grasp trim in meters (tune live, then persist in the map's
+        # heights: trim_x/trim_y). +x forward, +y left (viewed from BEHIND).
+        self.declare_parameter('trim_x', 0.0)
+        self.declare_parameter('trim_y', 0.0)
         self.declare_parameter('speech_topic', '/robot_speech')
 
         p = lambda name: self.get_parameter(name).value  # noqa: E731
@@ -50,6 +54,8 @@ class PlanarPick(Node):
         self.place_x = float(p('place_x'))
         self.place_y = float(p('place_y'))
         self.wrist_sign = int(p('wrist_sign'))
+        self.trim_x = float(p('trim_x'))
+        self.trim_y = float(p('trim_y'))
 
         self.speech_pub = self.create_publisher(String, p('speech_topic'), 10)
         self.io = pc.ArmIO(self, p('camera_topic'))
@@ -65,7 +71,8 @@ def pick(node) -> bool:
     return pc.run_pick(node, node.io, node.color, node.map_path, node.say,
                        place_after=node.place_after,
                        place_x=node.place_x, place_y=node.place_y,
-                       wrist_sign=node.wrist_sign)
+                       wrist_sign=node.wrist_sign,
+                       trim_x=node.trim_x, trim_y=node.trim_y)
 
 
 def main(args=None) -> None:
