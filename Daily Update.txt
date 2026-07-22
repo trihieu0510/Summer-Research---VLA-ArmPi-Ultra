@@ -174,3 +174,31 @@ then start faster-whisper STT (remote-friendly) to make it "SAY grab the red blo
 Later/optional: YOLO "what do you see?" skill (ultralytics already on the Pi) — queued behind STT.
 Status: chat agent now converses, gestures, does parametric/sequential moves, AND picks colored blocks on
 command. Remaining for the headline demo: voice input. See Documents/COMMANDS.md sec 1 + 5b.
+
+13/07
+- Built the EARS: stt_node (arecord -> webrtcvad utterance gating -> faster-whisper base.en int8 -> /voice_words).
+  install_stt.sh does deps + model + a SILENT self-test (piper speaks a WAV, whisper transcribes the file —
+  tested the ears without me saying a word, since the room was full).
+- Half-duplex: tts_node now broadcasts /tts_busy; the mic mutes while the robot talks (else it obeys itself).
+- STT is OPT-IN (ARMPI_STT=1 ARMPI_MIC=plughw:2,0): open mic in a shared room = anyone commands the robot.
+- IT HEARD ME: log showed Heard: "pick the red block" -> the arm went for it. Spoken commands work. M3 lives.
+- Whisper hallucinates "You"/"Thank you" on breaths -> noise filter added.
+- Mat had moved since Thursday -> recalibrated (routine now, ~15 min). Fixed ICS internet drop again.
+
+21/07 (big fix day + a hardware diagnosis)
+- LLM was suddenly slow: our Jul rename to deepseek-v4-flash had silently switched it into THINKING mode
+  (deepseek-chat was the non-thinking alias). Now send thinking:disabled + log "LLM replied in X.Xs".
+- chat.sh no longer kills the camera on exit — the kill/restart cycle kept jamming the USB device (0x21003).
+- Grip quality pass: minAreaRect center+angle, wrist roll aligns jaws to rotated blocks (circular mod-90 angle
+  mean fixed wrong-way swings near ±45°), 13° deadband (wide jaws forgive small misalignment), live-tunable
+  constant trim (trim_x/trim_y, persisted in planar_map.yaml). ~80% success in the prime zone (x<=0.19).
+- MY IDEA OF THE DAY: sector scan. Camera rides the arm, so rotating ONLY the base shows a new patch of table
+  with identical geometry -> same homography, result rotated back by the base angle. One calibration, ~3x the
+  workspace (front, +36°, -36°). Built + unit-tested; live sign check pending.
+- Servo 3 diagnosed: STRIPPED GEAR TEETH (buzzes at specific angles; freewheels there by hand when powered off
+  — from the Jul 10 mat crash). Ordering a replacement; swap + re-trim is next lab session's first job.
+- Full handoff written: Documents/session_handoff_2026-07-21.md (read that first next session).
+
+Next session: swap servo 3 -> quick recalib + re-trim -> FORMAL 10-pick tally (closes M1) -> sector-scan sign
+test -> talk+listen combined test. Then the eval harness (remote-buildable) before Week 6 trials.
+Status: end of PLAN Week 4 with Week 4's exit criterion met (spoken command ran the whole loop). Buffer intact.
