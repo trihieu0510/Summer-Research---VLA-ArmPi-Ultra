@@ -202,3 +202,28 @@ command. Remaining for the headline demo: voice input. See Documents/COMMANDS.md
 Next session: swap servo 3 -> quick recalib + re-trim -> FORMAL 10-pick tally (closes M1) -> sector-scan sign
 test -> talk+listen combined test. Then the eval harness (remote-buildable) before Week 6 trials.
 Status: end of PLAN Week 4 with Week 4's exit criterion met (spoken command ran the whole loop). Buffer intact.
+22/07 (remote build day — the base for everything left)
+- No lab access, so built the remaining Week 5-7 scaffolding entirely remotely (servo 3 swap deferred; informal
+  ~80% tally accepted, formal numbers now come from the harness below).
+- EVAL HARNESS (the Week 5-6 deliverable):
+  * trial_log.py — every pick (CLI or chat) appends one JSONL line: phrasing, LLM latency, sector, pixel,
+    mapped XY, wrist delta, per-stage timings, outcome. Wired through run_pick's every exit path; logging
+    can never break a pick (all file I/O swallowed).
+  * eval_runner — guided trial sessions: prints where to place which block, sends the phrasing through the
+    FULL pipeline, suggests a verdict from the robot's reply, operator confirms -> ~/eval_trials.jsonl.
+    RESUMABLE (skips logged trial ids). Default matrix: 4 rounds x 10 positions x 3 colors = 120 trials.
+  * eval_analysis — stdlib-only (runs on the laptop too): Wilson 95% CIs, breakdowns by color/position/
+    rotation/phrasing, robot-vs-operator disagreement rate, latency medians. --selftest PASSED locally.
+- "WHAT DO YOU SEE?": scene_describe.py + {"action":"describe"} agent step. HSV blocks (always works, reuses
+  the proven detector + mat ROI) + optional YOLOv8n general objects (lazy-loaded; missing ultralytics degrades
+  to blocks-only, never breaks chat). Saves /tmp/describe_debug.jpg. Never run on hardware yet — P3 protocol.
+- NAMED PLACE DESTINATIONS: {"action":"pick","color":"red","place":"box"} — DESTINATIONS table in
+  planar_common, overridable per-map via a destinations: key in planar_map.yaml (same pattern as trim).
+  planar_pick got -p place:=box. Real box coordinates get measured in lab (P4).
+- Documents/lab_protocols.md: five self-contained protocols (P1 sector sign, P2 talk+listen, P3 describe
+  first-light, P4 destination measure-in, P5 eval session) — next lab visit is execution, not thinking.
+- Documents/writeup_skeleton.md: full paper outline ([DRAFT] sections writable now, [DATA] slots wait for
+  eval numbers) + the 10-shot demo video list.
+- Everything py_compile-checked; analysis + trial-log unit-tested locally. NOT yet run on the Pi.
+Next session (lab): P1 sector sign -> P2 talk+listen -> P3 describe -> P4 box coords -> start P5 trials.
+Status: Week 5 scaffolding done ahead of schedule, built remotely. The lab TODO list is now purely mechanical.
