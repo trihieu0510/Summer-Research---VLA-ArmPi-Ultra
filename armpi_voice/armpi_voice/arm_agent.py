@@ -316,9 +316,19 @@ class ArmAgent(Node):
                     steps.append({"action": "move", "moves": moves})
             elif action == "pick":
                 # "place" may be a bool (default drop spot) or a destination
-                # name string ("box") — keep whichever the LLM sent.
+                # name string ("box"). LLMs sometimes stringify booleans —
+                # bool("false") is True in Python, which would silently add
+                # an uncommanded carry-and-release, so normalize those first.
                 place = s.get("place", False)
-                if not isinstance(place, str):
+                if isinstance(place, str):
+                    low = place.strip().lower()
+                    if low in ('', 'false', 'no', 'none', '0'):
+                        place = False
+                    elif low in ('true', 'yes', '1'):
+                        place = True
+                    else:
+                        place = low               # a destination name
+                else:
                     place = bool(place)
                 steps.append({"action": "pick",
                               "color": str(s.get("color", "red")).lower(),
@@ -379,9 +389,31 @@ class ArmAgent(Node):
             self._speak('Something went wrong while I was picking.')
             trial.note(error=str(exc))
             trial.finish('error')
-        # The pick drove servos 2-6 via IK, so our tracked positions are stale;
-        # snap the expectation back to the view pose the skill ends in.
-        self.current.update({sid: pos for sid, pos in HOME_POSE})
+        # run_pick leaves the arm wherever the outcome dictated (a sector view
+        # pose, or hovering over the drop spot). Drive back to the calibrated
+        # view pose so the arm ends somewhere KNOWN, and track THAT pose.
+        # (The old HOME_POSE reset here lied about servos 3-5 by up to ~500
+        # units, so a later relative move like "raise motor 4 a bit" could
+        # command a violent uncommanded jump.)
+        self._settle_at_view_pose(pc, io)
+
+    def _settle_at_view_pose(self, pc, io) -> None:
+        """Return the arm to the calibrated view pose and sync self.current.
+
+        Never commands the gripper (servo 1) — the jaws may be holding a
+        block, and loosening them here would drop it.
+        """
+        try:
+            vp = pc.load_map(self.map_path)['view_pose']
+        except Exception:                         # noqa: BLE001
+            vp = dict(pc.VIEW_POSE_DEFAULT)
+        pose = {int(s): int(p) for s, p in vp.items() if int(s) != pc.GRIPPER_ID}
+        try:
+            io.set_servos(1.5, sorted(pose.items()))
+        except Exception as exc:                  # noqa: BLE001
+            self.get_logger().warn(f'Could not return to view pose: {exc}')
+            return
+        self.current.update(pose)
 
     def execute_describe(self) -> None:
         """Look at the mat from the view pose and speak what's visible."""
@@ -395,6 +427,9 @@ class ArmAgent(Node):
             from . import scene_describe as sd
             m = pc.load_map(self.map_path)
             io.go_view_pose(m['view_pose'])
+            # go_view_pose commanded every servo in the map's pose (gripper
+            # included) — track exactly that, not HOME_POSE.
+            self.current.update({int(s): int(p) for s, p in m['view_pose'].items()})
             frame = io.fresh_frame()
             if frame is None:
                 self._speak("My camera isn't giving me a picture right now.")
@@ -412,7 +447,6 @@ class ArmAgent(Node):
         except Exception as exc:                  # noqa: BLE001
             self.get_logger().error(f'Describe failed: {exc}')
             self._speak("Something went wrong while I was looking.")
-        self.current.update({sid: pos for sid, pos in HOME_POSE})
 
     def execute_moves(self, moves) -> None:
         """Execute one parametric move (absolute target or relative delta per servo)."""

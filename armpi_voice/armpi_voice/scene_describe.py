@@ -122,6 +122,8 @@ def describe_frame(bgr, roi=None, yolo_model='', conf=0.4, log_warn=None):
 
 def _join(items):
     """['a', 'b', 'c'] -> 'a, b and c' (natural-speech list)."""
+    if not items:
+        return ''
     if len(items) == 1:
         return items[0]
     return ', '.join(items[:-1]) + ' and ' + items[-1]

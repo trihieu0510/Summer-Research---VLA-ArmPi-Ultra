@@ -78,10 +78,9 @@ class PlanarPick(Node):
         self.get_logger().info(f'🗣  {text}')
 
 
-def pick(node) -> bool:
+def pick(node, trial) -> bool:
     # The whole behavior lives in planar_common.run_pick — shared verbatim
     # with arm_agent's chat "pick" step, so CLI and chat can't drift apart.
-    trial = pc.TrialLog(node.trial_log or None, source='cli', color=node.color)
     return pc.run_pick(node, node.io, node.color, node.map_path, node.say,
                        place_after=node.place_after,
                        place_x=node.place_x, place_y=node.place_y,
@@ -98,13 +97,21 @@ def main(args=None) -> None:
     spinner.start()
     time.sleep(1.0)   # let the camera subscription warm up
     ok = False
+    # Trial created HERE so every exit path can finish it — a lost trial
+    # line is lost eval data (the agent path does the same in execute_pick).
+    trial = pc.TrialLog(node.trial_log or None, source='cli', color=node.color)
     try:
-        ok = pick(node)
+        ok = pick(node, trial)
     except FileNotFoundError:
         node.get_logger().error(
             f'No planar map at {node.map_path} — run planar_calib first.')
+        trial.finish('no_map')
     except KeyboardInterrupt:
-        pass
+        trial.finish('aborted')
+    except Exception as exc:                      # noqa: BLE001
+        node.get_logger().error(f'Pick crashed: {exc}')
+        trial.note(error=str(exc))
+        trial.finish('error')
     finally:
         # Stop the executor BEFORE destroying the node — the reverse order
         # races the spin thread and aborts with "terminate called without

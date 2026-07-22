@@ -17,14 +17,16 @@ Each trial:
        ~/pick_trials.jsonl via run_pick's TrialLog; the two files cross-check).
 
 Sessions are RESUMABLE: already-logged trial ids are skipped on restart, so
-an interrupted session (or a servo swap mid-week) costs nothing.
+an interrupted session (or a servo swap mid-week) costs nothing. Note that
+SKIPPED trials are intentionally NOT logged — they reappear in every future
+session until either completed or removed from the matrix parameters.
 
 Run (chat.sh stack must be up — agent + SDK + camera; console not needed):
     ros2 run armpi_voice eval_runner
     ros2 run armpi_voice eval_runner --ros-args -p rounds:=2 -p colors:="[red]"
 
-Analysis afterwards (works on the Pi or the laptop):
-    python3 eval_analysis.py ~/eval_trials.jsonl ~/pick_trials.jsonl
+Analysis afterwards (on the Pi; on the laptop run eval_analysis.py directly):
+    ros2 run armpi_voice eval_analysis ~/eval_trials.jsonl ~/pick_trials.jsonl
 
 Runs ON THE PI, inside the Hiwonder ROS 2 Humble Docker container.
 """
@@ -72,17 +74,25 @@ PHRASINGS = [
     'please grab the {color} one',
 ]
 
-# Map the robot's spoken outcome lines (from run_pick) to suggested verdicts.
+# Map the robot's spoken outcome lines (from run_pick / execute_pick) to
+# suggested verdicts. Patterns are anchored to the exact sentences the code
+# speaks (not just generic English) so a chatty LLM acknowledgment like
+# "I can't see why not!" can't be mistaken for an outcome.
 CLAIM_PATTERNS = [
     (r'picked and placed', 'success'),
     (r'got the \w+ block', 'success'),
     (r'drop spot is unreachable', 'success'),   # pick itself succeeded
-    (r'i missed', 'missed'),
-    (r'knocked away', 'knocked'),
-    (r"can't see", 'not_seen'),
+    (r'i missed the \w+ block', 'missed'),
+    (r'knocked away the \w+ block', 'knocked'),
+    (r"can't see a \w+ block", 'not_seen'),
     (r'outside the zone', 'out_of_zone'),
-    (r"can't reach", 'ik_refused'),
+    (r"can't reach that spot", 'ik_refused'),
     (r'went wrong', 'error'),
+    # Setup problems — match immediately instead of burning the full
+    # reply_timeout with no hint why:
+    (r"haven't been calibrated", 'error'),
+    (r'calibration map is missing', 'error'),
+    (r'i only know red, green and blue', 'error'),
 ]
 
 VERDICT_KEYS = {
@@ -138,7 +148,11 @@ class EvalRunner(Node):
         replies, deadline = [], time.monotonic() + self.reply_timeout
         while time.monotonic() < deadline:
             try:
-                reply = self._replies.get(timeout=deadline - time.monotonic())
+                # max(): the deadline can pass between the loop check and
+                # this call on a busy Pi — a negative timeout raises
+                # ValueError and would kill the whole session.
+                reply = self._replies.get(
+                    timeout=max(0.0, deadline - time.monotonic()))
             except queue.Empty:
                 break
             replies.append(reply)
@@ -240,6 +254,8 @@ def run(node):
             note = ''
             if verdict == 'other':
                 note = ask('  note (what actually happened): ')
+                if note == 'q':      # quitting here must quit, not log 'q'
+                    return
             rec = dict(t, robot_claim=claim, verdict=verdict, note=note,
                        replies=replies, elapsed_s=elapsed,
                        ts=round(time.time(), 2))
@@ -250,7 +266,7 @@ def run(node):
             break
 
     print(f'\nSession complete — {len(done)} trials in {node.log_path}.')
-    print('Analyze with:  python3 eval_analysis.py ~/eval_trials.jsonl')
+    print('Analyze with:  ros2 run armpi_voice eval_analysis ~/eval_trials.jsonl')
 
 
 def main(args=None) -> None:

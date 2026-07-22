@@ -27,7 +27,9 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('model', default_value='deepseek-chat'),
+        # deepseek-chat retired 2026-07-24; v4-flash is its successor (the
+        # agent disables thinking mode itself — see arm_agent.py).
+        DeclareLaunchArgument('model', default_value='deepseek-v4-flash'),
         DeclareLaunchArgument('base_url', default_value='https://api.deepseek.com'),
         Node(
             package='armpi_voice',

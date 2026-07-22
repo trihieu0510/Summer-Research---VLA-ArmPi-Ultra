@@ -58,8 +58,9 @@ This is the paper's main contribution — the story writes itself:
 - Safety choice: open-mic is opt-in (shared-room policy).
 
 ## 5. Evaluation **[DATA]**
-- Protocol: `Documents/lab_protocols.md` P5 — positions × colors × phrasings
-  matrix, operator-verified verdicts, resumable sessions.
+- Protocol: `Documents/lab_protocols.md` P5 — positions × colors × rounds
+  matrix (phrasings rotated across trials), operator-verified verdicts,
+  resumable sessions.
 - Headline: overall success + Wilson 95% CI (paste `eval_analysis.py --md`).
 - Breakdowns: by position (near vs far vs rotated), color, phrasing;
   robot-self-report vs operator disagreement rate (= verify-layer quality).

@@ -27,7 +27,12 @@ import os
 import sys
 from collections import Counter, defaultdict
 
-SUCCESS_VERDICTS = {'success', 'placed'}
+# place_unreachable counts as success: the GRASP succeeded (eval_runner maps
+# the matching spoken line to 'success' too — without this, the same physical
+# event would count success in the operator table but failure in the robot
+# table, fabricating disagreement). Place-layer quality is visible separately
+# in the outcome distribution.
+SUCCESS_VERDICTS = {'success', 'placed', 'place_unreachable'}
 
 
 def wilson(k, n, z=1.96):
@@ -130,7 +135,7 @@ def summarize(operator, robot):
             mid = durations[len(durations) // 2]
             out.append(f'\nPick duration: median {mid:.1f}s, '
                        f'max {durations[-1]:.1f}s.')
-        llm = sorted(r['llm_s'] for r in robot if r.get('llm_s'))
+        llm = sorted(r['llm_s'] for r in robot if 'llm_s' in r)
         if llm:
             out.append(f'LLM latency: median {llm[len(llm) // 2]:.1f}s, '
                        f'max {llm[-1]:.1f}s.')
@@ -176,7 +181,9 @@ def selftest():
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[3])
+    ap = argparse.ArgumentParser(
+        description='Turn trial JSONL logs into pick success rates with '
+                    'Wilson 95% confidence intervals.')
     ap.add_argument('files', nargs='*', help='JSONL trial logs (mixed kinds OK)')
     ap.add_argument('--md', help='also write the report to this markdown file')
     ap.add_argument('--selftest', action='store_true',

@@ -10,6 +10,9 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        # Without this, `ros2 launch armpi_voice chat.launch.py` can't find
+        # the launch file no matter what's in src/.
+        ('share/' + package_name + '/launch', ['launch/chat.launch.py']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

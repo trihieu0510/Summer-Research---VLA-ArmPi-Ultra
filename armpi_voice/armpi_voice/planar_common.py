@@ -468,7 +468,12 @@ def resolve_destination(m, name):
     """
     table = dict(DESTINATIONS)
     for key, val in (m.get('destinations') or {}).items():
-        table[str(key).strip().lower()] = (float(val[0]), float(val[1]))
+        # One malformed YAML entry (scalar, short list, non-numeric) must
+        # not kill every lookup — skip it and keep the rest of the table.
+        try:
+            table[str(key).strip().lower()] = (float(val[0]), float(val[1]))
+        except (TypeError, ValueError, IndexError, KeyError):
+            continue
     return table.get(str(name).strip().lower())
 
 

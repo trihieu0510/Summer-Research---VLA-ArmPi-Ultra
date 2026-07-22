@@ -83,9 +83,10 @@ hardware).
 2. Find its robot-frame XY: run one pick with place and watch where the arm
    releases: `put the red block in the box` (currently uses the default drop
    spot 0.13, −0.12).
-3. Nudge coordinates until the release lands in the box:
-   `ros2 run armpi_voice planar_pick --ros-args -p color:=red -p place:=box -p place_x:=0.14 -p place_y:=-0.14`
-   (explicit place_x/place_y override the name while tuning).
+3. Nudge coordinates until the release lands in the box — tune WITHOUT the
+   name (a resolvable name like `box` always wins over place_x/place_y, so
+   `place:=box` during tuning would silently ignore your nudges):
+   `ros2 run armpi_voice planar_pick --ros-args -p color:=red -p place_after:=true -p place_x:=0.14 -p place_y:=-0.14`
 4. Persist the result in the map — add to `~/planar_map.yaml` (top level):
 
    ```yaml
@@ -110,8 +111,10 @@ across multiple sessions freely — the runner RESUMES (skips logged trials).
    is wrong — e.g. claims success with an empty gripper).
 3. Trials land in `~/eval_trials.jsonl`; the robot's own per-stage log in
    `~/pick_trials.jsonl`. Copy both off the Pi at the end of every session.
-4. Analyze (Pi or laptop):
-   `python3 eval_analysis.py ~/eval_trials.jsonl ~/pick_trials.jsonl --md report.md`
+4. Analyze — on the Pi (works from any directory once sourced):
+   `ros2 run armpi_voice eval_analysis ~/eval_trials.jsonl ~/pick_trials.jsonl --md report.md`
+   or on the laptop (no ROS needed):
+   `python armpi_voice/armpi_voice/eval_analysis.py eval_trials.jsonl pick_trials.jsonl`
 
 Protocol discipline for honest numbers: don't re-roll failed trials (that's
 what `r = redo` is NOT for — redo only on operator mistakes, e.g. wrong

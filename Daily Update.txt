@@ -227,3 +227,22 @@ Status: end of PLAN Week 4 with Week 4's exit criterion met (spoken command ran 
 - Everything py_compile-checked; analysis + trial-log unit-tested locally. NOT yet run on the Pi.
 Next session (lab): P1 sector sign -> P2 talk+listen -> P3 describe -> P4 box coords -> start P5 trials.
 Status: Week 5 scaffolding done ahead of schedule, built remotely. The lab TODO list is now purely mechanical.
+
+22/07 (later — three-subagent code review of today's work, then fixed everything found)
+- Review found 19 real issues; all fixed. The big ones:
+  * SAFETY: after pick/describe the agent reset its tracked servo state to HOME while the arm was really at
+    the view pose (servo 4 off by ~500 units) — a follow-up relative move could command a violent jump. Now
+    the arm explicitly returns to the calibrated view pose (gripper excluded — may hold a block) and tracks it.
+  * "place":"false" from the LLM would have FORCED a place (bool("false") is True) — boolean-strings normalized.
+  * eval_runner could crash mid-session (negative queue timeout race on a busy Pi) — clamped.
+  * lab_protocols P4 tuning command was self-defeating (place:=box always overrode the nudges) — rewritten.
+  * place_unreachable now counts as grasp success in BOTH tables (was skewing the disagreement metric).
+  * resolve_destination survives malformed map YAML; CLI picks can no longer lose their trial line.
+  * chat.launch.py default model was the retiring deepseek-chat -> v4-flash; launch file now actually
+    installable (setup.py data_files) + synced by install_pi.sh (plus package.xml, voice_arm_control).
+  * README rewritten around the real architecture (it still taught gripper open=200 — the block-wedger).
+  * Untracked the stray Word lock file; .gitignore hardened.
+- NEW: armpi_voice/test/test_planar_math.py — 28 laptop-runnable tests over the pure math (homography fit,
+  bounded rejection, SECTOR ROTATION SIGN GEOMETRY, wrist mod-90 folding, droop rules, destinations).
+  All pass. The sector test encodes the convention P1 will verify live: +150 pulses = +36 deg = LEFT = +y.
+Status: everything reviewed, fixed, tested, pushed. Pi picks it all up with one install_pi.sh run.

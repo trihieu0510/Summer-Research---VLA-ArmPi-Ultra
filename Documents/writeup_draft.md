@@ -279,8 +279,9 @@ shared lab requires.
 **[DATA: this entire section is generated — run protocol P5, then paste
 `eval_analysis.py --md` output.]** Design (already implemented): a guided
 trial runner walks the operator through a matrix of 10 positions (6 flat,
-4 rotated 30–45°) × 3 colors × 4 phrasings × 4 rounds ≈ 120 trials, sending
-each phrasing through the complete pipeline including the LLM. The
+4 rotated 30–45°) × 3 colors × 4 rounds = 120 trials, with four command
+phrasings rotated across trials (not fully crossed), each sent through the
+complete pipeline including the LLM. The
 operator's verdict is ground truth; the robot's per-stage self-log
 (detection pixel, mapped XY, sector, wrist delta, timings, outcome) is
 cross-referenced for failure analysis. Success rates are reported with

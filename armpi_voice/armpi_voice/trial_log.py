@@ -27,6 +27,9 @@ class TrialLog:
 
     path=None collects in memory only (a no-op sink — run_pick logs
     unconditionally, callers decide whether it lands on disk).
+
+    Appends assume a SINGLE writer per path at a time (true today: the
+    agent's worker thread and the CLI process never run picks concurrently).
     """
 
     def __init__(self, path=None, **fixed):

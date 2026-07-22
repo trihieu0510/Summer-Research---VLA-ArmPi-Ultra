@@ -1,1 +1,6 @@
 __pycache__/
+venv/
+armpi/
+# Word owner/lock temp files (one was accidentally committed once)
+~WRL*.tmp
+~$*
