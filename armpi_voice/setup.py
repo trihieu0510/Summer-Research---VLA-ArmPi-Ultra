@@ -28,6 +28,8 @@ setup(
             'planar_calib = armpi_voice.planar_calib:main',
             'planar_pick = armpi_voice.planar_pick:main',
             'stt_node = armpi_voice.stt_node:main',
+            'eval_runner = armpi_voice.eval_runner:main',
+            'eval_analysis = armpi_voice.eval_analysis:main',
         ],
     },
 )

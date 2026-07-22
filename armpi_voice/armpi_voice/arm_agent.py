@@ -88,6 +88,11 @@ class ArmAgent(Node):
         # Pick skill (needs a planar_map.yaml from planar_calib + the camera):
         self.declare_parameter('camera_topic', '/depth_cam/rgb/image_raw')
         self.declare_parameter('map_path', '~/planar_map.yaml')
+        # Eval harness: every pick appends one JSONL line here ('' disables).
+        self.declare_parameter('trial_log', '~/pick_trials.jsonl')
+        # "What do you see?" — optional YOLO weights for general objects
+        # (ultralytics lives under ~/software). Missing model = blocks only.
+        self.declare_parameter('yolo_model', '~/software/yolov8n.pt')
 
         self.model_name = self.get_parameter('model').value
         base_url = self.get_parameter('base_url').value
@@ -135,6 +140,10 @@ class ArmAgent(Node):
         # --- Planar pick skill (optional — armed only if a calibration map exists) ---
         self.map_path = os.path.expanduser(self.get_parameter('map_path').value)
         self._camera_topic = self.get_parameter('camera_topic').value
+        self.trial_log_path = str(self.get_parameter('trial_log').value).strip()
+        self.yolo_model = str(self.get_parameter('yolo_model').value).strip()
+        self._last_text = ''          # phrasing that triggered the current turn
+        self._last_llm_s = 0.0        # its LLM latency, for the trial record
         self._planar = None                      # (planar_common, ArmIO) once armed
         if os.path.exists(self.map_path):
             self._init_planar()
@@ -176,8 +185,12 @@ class ArmAgent(Node):
             '{"servo": <1-6>, "target": <0-1000>}  OR  {"servo": <1-6>, "delta": <signed>} ]}\n'
             '  - a pick skill: {"action": "pick", "color": "red"} — visually find the colored '
             'block on the mat and grab it (colors: red, green, blue). Add "place": true to '
-            'also carry it to the drop spot and release. Use this whenever the user asks to '
-            'grab/pick/get a block.\n'
+            'also carry it to the default drop spot and release, or "place": "<name>" for a '
+            'named destination (known: drop, box, left, right). Use this whenever the user '
+            'asks to grab/pick/get a block.\n'
+            '  - a look skill: {"action": "describe"} — look at the mat and say what is seen '
+            '(colored blocks, plus other objects). Use when asked "what do you see?" or '
+            '"is there a red block?".\n'
             "Steps run in order, one after another, so chain them for sequences. Servos listed "
             "together inside ONE move happen simultaneously. Keep any single delta <=300.\n\n"
             "Respond with ONLY a JSON object: "
@@ -194,6 +207,10 @@ class ArmAgent(Node):
             '{"steps":[{"action":"pick","color":"red"}],"say":"Looking for the red block!"}\n'
             '  "pick up the blue block and put it away" -> '
             '{"steps":[{"action":"pick","color":"blue","place":true}],"say":"Blue block, coming up."}\n'
+            '  "put the red block in the box" -> '
+            '{"steps":[{"action":"pick","color":"red","place":"box"}],"say":"Red block, into the box."}\n'
+            '  "what do you see?" -> '
+            '{"steps":[{"action":"describe"}],"say":"Let me take a look."}\n'
             '  "what can you do?" -> '
             '{"steps":[],"say":"I can turn, nod, move each joint, chain sequences, and pick up '
             'colored blocks from the mat."}'
@@ -215,6 +232,7 @@ class ArmAgent(Node):
             except queue.Empty:
                 continue
             try:
+                self._last_text = text
                 steps, say = self._reason(text)
                 self.get_logger().info(f'Decided -> steps={steps}, say={say!r}')
                 if say:
@@ -256,7 +274,8 @@ class ArmAgent(Node):
             else:
                 raise
         content = (response.choices[0].message.content or "").strip()
-        self.get_logger().info(f'LLM replied in {time.time() - t0:.1f}s: {content}')
+        self._last_llm_s = round(time.time() - t0, 2)
+        self.get_logger().info(f'LLM replied in {self._last_llm_s:.1f}s: {content}')
         steps, say = self._parse_reply(content)
 
         self._history.append({"role": "user", "content": text})
@@ -296,9 +315,16 @@ class ArmAgent(Node):
                 if isinstance(moves, list) and moves:
                     steps.append({"action": "move", "moves": moves})
             elif action == "pick":
+                # "place" may be a bool (default drop spot) or a destination
+                # name string ("box") — keep whichever the LLM sent.
+                place = s.get("place", False)
+                if not isinstance(place, str):
+                    place = bool(place)
                 steps.append({"action": "pick",
                               "color": str(s.get("color", "red")).lower(),
-                              "place": bool(s.get("place", False))})
+                              "place": place})
+            elif action == "describe":
+                steps.append({"action": "describe"})
             elif action in ACTIONS:
                 steps.append({"action": action})
         return steps, say
@@ -316,11 +342,17 @@ class ArmAgent(Node):
                 self.execute_moves(step["moves"])
             elif step["action"] == "pick":
                 self.execute_pick(step.get("color", "red"), step.get("place", False))
+            elif step["action"] == "describe":
+                self.execute_describe()
             else:
                 self.execute_action(step["action"])
 
-    def execute_pick(self, color: str, place: bool) -> None:
-        """Run the planar pick skill (blocking, ~20s). Narrates its own outcome."""
+    def execute_pick(self, color: str, place) -> None:
+        """Run the planar pick skill (blocking, ~20s). Narrates its own outcome.
+
+        `place`: False = just lift, True = default drop spot, "<name>" = a
+        named destination from the map / DESTINATIONS table.
+        """
         if self._planar is None and os.path.exists(self.map_path):
             self._init_planar()   # map may have appeared since startup
         if self._planar is None:
@@ -331,15 +363,55 @@ class ArmAgent(Node):
             self._speak(f"I only know red, green and blue blocks, not {color}.")
             return
         self.get_logger().info(f'Executing pick: color={color}, place={place}')
+        # One JSONL line per attempt — the eval harness reads these files.
+        trial = pc.TrialLog(self.trial_log_path or None, source='agent',
+                            phrasing=self._last_text, llm_s=self._last_llm_s)
         try:
-            pc.run_pick(self, io, color, self.map_path, self._speak, place_after=place)
+            pc.run_pick(self, io, color, self.map_path, self._speak,
+                        place_after=bool(place),
+                        place_name=place if isinstance(place, str) else '',
+                        trial=trial)
         except FileNotFoundError:
             self._speak("My calibration map is missing — run planar_calib first.")
+            trial.finish('no_map')
         except Exception as exc:                  # noqa: BLE001
             self.get_logger().error(f'Pick failed: {exc}')
             self._speak('Something went wrong while I was picking.')
+            trial.note(error=str(exc))
+            trial.finish('error')
         # The pick drove servos 2-6 via IK, so our tracked positions are stale;
         # snap the expectation back to the view pose the skill ends in.
+        self.current.update({sid: pos for sid, pos in HOME_POSE})
+
+    def execute_describe(self) -> None:
+        """Look at the mat from the view pose and speak what's visible."""
+        if self._planar is None and os.path.exists(self.map_path):
+            self._init_planar()
+        if self._planar is None:
+            self._speak("I need my calibrated view pose to look around — run planar_calib first.")
+            return
+        pc, io = self._planar
+        try:
+            from . import scene_describe as sd
+            m = pc.load_map(self.map_path)
+            io.go_view_pose(m['view_pose'])
+            frame = io.fresh_frame()
+            if frame is None:
+                self._speak("My camera isn't giving me a picture right now.")
+                return
+            roi = pc.roi_from_points(m.get('points'))
+            sentence, annotated = sd.describe_frame(
+                frame, roi=roi, yolo_model=self.yolo_model,
+                log_warn=lambda s: self.get_logger().warn(s))
+            try:
+                import cv2                        # pyrefly: ignore [missing-import]
+                cv2.imwrite('/tmp/describe_debug.jpg', annotated)
+            except Exception:                     # noqa: BLE001
+                pass
+            self._speak(sentence)
+        except Exception as exc:                  # noqa: BLE001
+            self.get_logger().error(f'Describe failed: {exc}')
+            self._speak("Something went wrong while I was looking.")
         self.current.update({sid: pos for sid, pos in HOME_POSE})
 
     def execute_moves(self, moves) -> None:

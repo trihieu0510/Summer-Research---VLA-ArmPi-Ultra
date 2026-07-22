@@ -26,6 +26,10 @@ curl -fsSL "$BASE/armpi_voice/armpi_voice/planar_common.py$V" -o "$PKG/armpi_voi
 curl -fsSL "$BASE/armpi_voice/armpi_voice/planar_calib.py$V"  -o "$PKG/armpi_voice/planar_calib.py"
 curl -fsSL "$BASE/armpi_voice/armpi_voice/planar_pick.py$V"   -o "$PKG/armpi_voice/planar_pick.py"
 curl -fsSL "$BASE/armpi_voice/armpi_voice/stt_node.py$V"      -o "$PKG/armpi_voice/stt_node.py"
+curl -fsSL "$BASE/armpi_voice/armpi_voice/trial_log.py$V"     -o "$PKG/armpi_voice/trial_log.py"
+curl -fsSL "$BASE/armpi_voice/armpi_voice/scene_describe.py$V" -o "$PKG/armpi_voice/scene_describe.py"
+curl -fsSL "$BASE/armpi_voice/armpi_voice/eval_runner.py$V"    -o "$PKG/armpi_voice/eval_runner.py"
+curl -fsSL "$BASE/armpi_voice/armpi_voice/eval_analysis.py$V"  -o "$PKG/armpi_voice/eval_analysis.py"
 
 echo "Building armpi_voice..."
 cd "$HOME/ros2_ws"

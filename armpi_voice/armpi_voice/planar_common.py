@@ -39,6 +39,8 @@ from sensor_msgs.msg import Image
 # pyrefly: ignore [missing-import]
 from servo_controller_msgs.msg import ServoPosition, ServosPosition
 
+from .trial_log import TrialLog
+
 MAP_PATH_DEFAULT = os.path.expanduser('~/planar_map.yaml')
 
 # The pose the camera detects from. Defaults to the pose Hiwonder's own
@@ -444,17 +446,48 @@ class ArmIO:
 SCAN_SECTORS = [0, 150, -150]          # servo-6 pulse offsets (~±36°)
 DEG_PER_UNIT = 0.24
 
+# Named drop destinations for "put it in the box" style commands. Robot-frame
+# XY in meters (+x forward, +y LEFT viewed from behind the arm). These are
+# reachable defaults; measure real spots in the lab and persist them in the
+# map under a top-level `destinations:` key, which OVERRIDES this table:
+#     destinations:
+#       box: [0.14, -0.14]
+DESTINATIONS = {
+    'drop':  (0.13, -0.12),   # the historical place_after spot
+    'box':   (0.13, -0.12),   # alias until a real box position is measured in
+    'left':  (0.13, 0.12),
+    'right': (0.13, -0.12),
+}
+
+
+def resolve_destination(m, name):
+    """(x, y) for a destination name, or None if unknown.
+
+    Map-stored destinations win over the built-in table, so lab-measured spots
+    persist without a code change (same pattern as trim_x/trim_y).
+    """
+    table = dict(DESTINATIONS)
+    for key, val in (m.get('destinations') or {}).items():
+        table[str(key).strip().lower()] = (float(val[0]), float(val[1]))
+    return table.get(str(name).strip().lower())
+
 
 def run_pick(node, io, color, map_path, say, place_after=False,
              place_x=0.13, place_y=-0.12, wrist_sign=1,
-             trim_x=0.0, trim_y=0.0, scan=True, base_rot_sign=1):
+             trim_x=0.0, trim_y=0.0, scan=True, base_rot_sign=1,
+             place_name='', trial=None):
     """Detect the colored block (scanning left/right if needed), map to robot
     XY, grasp, verify. True on success.
 
     `say` is a callback(str) — publishes to /robot_speech in both callers, so
     the robot narrates outcomes identically from the CLI and from the chat.
+    `place_name` (e.g. "box") resolves a named drop spot from the map /
+    DESTINATIONS table and implies place_after=True.
+    `trial` is an optional TrialLog — every stage and the final outcome get
+    recorded for the evaluation harness (a None trial still logs, to nowhere).
     Raises FileNotFoundError if the map is missing (caller explains).
     """
+    trial = trial or TrialLog(None)
     m = load_map(map_path)
     node.get_logger().info(f'Planar map fit: {m["fit_info"]}')
     h = m['heights']
@@ -463,6 +496,17 @@ def run_pick(node, io, color, map_path, say, place_after=False,
     grip_close = h.get('grip_close', 540)
     grip_open = h.get('gripper_open', GRIPPER_OPEN)
     roi = roi_from_points(m.get('points'))
+    trial.note(color=color, fit=m['fit_info'], scan=bool(scan))
+
+    if place_name:
+        dest = resolve_destination(m, place_name)
+        if dest is None:
+            say(f"I don't know a spot called {place_name} — "
+                'using my usual drop spot.')
+        else:
+            place_x, place_y = dest
+        place_after = True
+        trial.note(place_name=place_name, place_xy=[place_x, place_y])
 
     det, sector, vp = None, 0, m['view_pose']
     for delta in (SCAN_SECTORS if scan else [0]):
@@ -478,10 +522,16 @@ def run_pick(node, io, color, map_path, say, place_after=False,
             break
     if det is None:
         say(f"I can't see a {color} block anywhere I looked.")
+        trial.finish('not_seen')
         return False
     rot_deg = sector * DEG_PER_UNIT * base_rot_sign
+    trial.stage('detected')
+    trial.note(sector=sector,
+               pixel=[round(det[0], 1), round(det[1], 1)],
+               angle_img=round(det[2], 1))
 
     qx, qy = apply_planar(m['H'], det[0], det[1])
+    trial.note(cal_xy=[round(qx, 4), round(qy, 4)])
 
     # Zone guard runs in the CALIBRATION frame (pre-rotation): outside the
     # supported area = extrapolation — bad detection or out of reach. Refuse.
@@ -496,6 +546,7 @@ def run_pick(node, io, color, map_path, say, place_after=False,
             f'Mapped target ({qx:.3f}, {qy:.3f}) outside calibrated area '
             f'x[{min(cal_x):.3f},{max(cal_x):.3f}] y[{min(cal_y):.3f},{max(cal_y):.3f}].')
         say(f'The {color} block is outside the zone I can reach.')
+        trial.finish('out_of_zone')
         return False
 
     # Rotate into the TRUE robot frame, then apply the measured grasp trim
@@ -519,6 +570,8 @@ def run_pick(node, io, color, map_path, say, place_after=False,
     node.get_logger().info(f'block angle {det[2]:.0f}° in image -> wrist delta {wrist} units')
 
     r = math.hypot(x, y)
+    trial.note(target_xy=[round(x, 4), round(y, 4)], r=round(r, 3),
+               wrist_delta=wrist)
     z_pl = far_z(r, z_place)
     z_hv = hover_z(r, z_hover)
     io.gripper(grip_open)
@@ -528,9 +581,11 @@ def run_pick(node, io, color, map_path, say, place_after=False,
             f'IK refused ({x:.3f}, {y:.3f}) at z_hover={z_hv} / z_place={z_pl}, '
             f'pitch={pitch} range={pitch_range}')
         say("I can't reach that spot.")
+        trial.finish('ik_refused')
         return False
     io.gripper(grip_close)
     io.move_xyz(x, y, z_hv, pitch, pitch_range, duration=1.0, wrist_delta=wrist)
+    trial.stage('grasped')
 
     # Verify: any blob still ON THE MAT means the grasp failed — same spot is
     # a clean miss, elsewhere means we knocked it. A held block only ever
@@ -541,10 +596,12 @@ def run_pick(node, io, color, map_path, say, place_after=False,
         du, dv = still_there[0] - det[0], still_there[1] - det[1]
         if (du * du + dv * dv) ** 0.5 < 40:
             say(f'I missed the {color} block.')
+            trial.finish('missed')
             return False
         frame_h = io.frame_height or 400
         if still_there[1] <= frame_h - 130:
             say(f'I knocked away the {color} block.')
+            trial.finish('knocked')
             return False
 
     if place_after:
@@ -556,8 +613,11 @@ def run_pick(node, io, color, map_path, say, place_after=False,
             io.gripper(grip_open)
             io.move_xyz(place_x, place_y, place_hv, pitch, pitch_range, duration=1.0)
             say(f'Picked and placed the {color} block.')
+            trial.finish('placed')
         else:
             say(f'Picked the {color} block, but the drop spot is unreachable.')
+            trial.finish('place_unreachable')
     else:
         say(f'Got the {color} block!')
+        trial.finish('success')
     return True
